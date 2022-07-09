@@ -1,5 +1,6 @@
 package streams
 
+// emptyPipeline returns the initial pipeline of the stream.
 func emptyPipeline[T any](source *source[T]) func() (T, bool) {
 	return func() (T, bool) {
 		return source.next(), true

@@ -13,15 +13,16 @@ type Stream[T any] interface {
 	getPipeline() func() (T, bool)
 
 	// Intermediate operations.
-	Filter(f func(x T) bool) Stream[T]               // Returns a stream consisting of the elements of this stream that match the given predicate.
-	Map(f func(x T) interface{}) Stream[interface{}] // Returns a stream consisting of the results of applying the given function to the elements of the stream.
-	Limit(n int) Stream[T]                           // Returns consisting of the elements of the stream but only limited to processing n elements.
+	Filter(f func(x T) bool) Stream[T]                               // Returns a stream consisting of the elements of this stream that match the given predicate.
+	Map(f func(x T) interface{}) Stream[interface{}]                 // Returns a stream consisting of the results of applying the given function to the elements of the stream.
+	Limit(n int) Stream[T]                                           // Returns a stream consisting of the elements of the stream but only limited to processing n elements.
+	Distinct(equals func(a, b T) bool, hash func(x T) int) Stream[T] // Returns a stream consisting of distinct elements from the stream using equality and hash code for the internal set.
 
 	// Terminal operations.
 	ForEach(f func(x T))       // Performs an action specified by the function f for each element of this stream.
 	Count() int                // Returns a ount of how many are processed by the stream.
 	Reduce(f func(x, y T) T) T // Reduces the stream to a single result using the given associative function.
-
+	Collect(collector Collector[T]) Collector[T]
 }
 
 // stream struct to represent a stream.
@@ -37,9 +38,12 @@ type stream[T any] struct {
 	pipeline   func() (T, bool) // pipeline of the operations.
 }
 
-// terminate
+// terminate this terinates the stream and sets its source to nil.
 func (stream *stream[T]) terminate() {
 	stream.terminated = true
+	stream.closed = true
+	stream.source = nil
+	stream.pipeline = nil
 }
 
 // getPipeline returns the pipeline of operations of the stream.
@@ -106,6 +110,43 @@ func (inputStream *stream[T]) Limit(limit int) Stream[T] {
 				}
 				return element, false
 			}
+		},
+		completed: inputStream.completed,
+	}
+	return &newStream
+}
+
+// element this type allows us to use sets for the Distinct operation.
+type element[T any] struct {
+	value    T
+	equals   func(a, b T) bool
+	hashCode func(a T) int
+}
+
+// Equals required by Hashable for using a set.
+func (a element[T]) Equals(b element[T]) bool {
+	return a.equals(a.value, b.value)
+}
+
+// HashCode produces the hash code of the element.
+func (a element[T]) HashCode() int {
+	return a.hashCode(a.value)
+}
+
+// Distinct returns a stream consisting of distinct elements from the stream using equality and hash code for the internal set.
+func (inputStream *stream[T]) Distinct(equals func(a, b T) bool, hashCode func(x T) int) Stream[T] {
+	set := hashset.New[element[T]]()
+	newStream := stream[T]{
+		pipeline: func() (T, bool) {
+			item, ok := inputStream.pipeline()
+			if !ok {
+				return item, false
+			} else if set.Contains(element[T]{value: item, equals: equals, hashCode: hashCode}) {
+				var sentinel T
+				return sentinel, false
+			}
+			set.Add(element[T]{value: item, equals: equals, hashCode: hashCode})
+			return item, true
 		},
 		completed: inputStream.completed,
 	}
@@ -198,4 +239,15 @@ func ToTreeSet[T types.Comparable[T]](stream Stream[T]) *treeset.TreeSet[T] {
 		set.Add(x)
 	})
 	return set
+}
+
+type Collector[T any] interface {
+	Add(element T) bool
+}
+
+func (stream *stream[T]) Collect(collector Collector[T]) Collector[T] {
+	stream.ForEach(func(element T) {
+		collector.Add(element)
+	})
+	return collector
 }
