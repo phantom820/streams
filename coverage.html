@@ -1,0 +1,662 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>streams: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/phantom820/streams/streams/errors.go (87.5%)</option>
+				
+				<option value="file1">github.com/phantom820/streams/streams/mocks.go (100.0%)</option>
+				
+				<option value="file2">github.com/phantom820/streams/streams/pipeline.go (100.0%)</option>
+				
+				<option value="file3">github.com/phantom820/streams/streams/sources.go (90.0%)</option>
+				
+				<option value="file4">github.com/phantom820/streams/streams/streams.go (98.0%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">no coverage</span>
+				<span class="cov1">low coverage</span>
+				<span class="cov2">*</span>
+				<span class="cov3">*</span>
+				<span class="cov4">*</span>
+				<span class="cov5">*</span>
+				<span class="cov6">*</span>
+				<span class="cov7">*</span>
+				<span class="cov8">*</span>
+				<span class="cov9">*</span>
+				<span class="cov10">high coverage</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package streams
+
+import (
+        "bytes"
+        "text/template"
+)
+
+// error codes.
+const (
+        StreamTerminated = 1
+        IllegalArgument  = 2
+)
+
+// error templates.
+var (
+        StreamTerminatedTemplate, _ = template.New("StreamTerminated").Parse("ErrStreamTerminated: A terminal operation has been invoked on the stream or it has been closed.")
+        IllegalArgumentTemplate, _  = template.New("IllegalArgument").Parse("ErrIllegalArgument: Illegal argument: {{.argument}} for operation: {{.operation}}.")
+)
+
+// Error a custom error type for stream.
+type Error struct {
+        code int
+        msg  string
+        Err  error
+}
+
+// Code returns the error code for the error.
+func (err Error) Code() int <span class="cov10" title="10">{
+        return err.code
+}</span>
+
+// Error returns the error message.
+func (err *Error) Error() string <span class="cov0" title="0">{
+        return err.msg
+}</span>
+
+// ErrStreamTerminated returns an error for a  stream that has already been terminated.
+func ErrStreamTerminated() Error <span class="cov9" title="8">{
+        var buffer bytes.Buffer
+        StreamTerminatedTemplate.Execute(&amp;buffer, map[string]int{})
+        return Error{code: StreamTerminated, msg: buffer.String()}
+}</span>
+
+// ErrIllegalArgument returns an error for a  stream operation that has been given an illegal argument.
+func ErrIllegalArgument(argument, operation string) Error <span class="cov3" title="2">{
+        var buffer bytes.Buffer
+        IllegalArgumentTemplate.Execute(&amp;buffer, map[string]string{"argument": argument, "operation": operation})
+        return Error{code: IllegalArgument, msg: buffer.String()}
+}</span>
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package streams
+
+type finiteSourceMock struct {
+        size    int
+        maxSize int
+}
+
+func (source *finiteSourceMock) Next() int <span class="cov9" title="41">{
+        source.size++
+        value := source.size
+        return value
+}</span>
+
+func (source *finiteSourceMock) HasNext() bool <span class="cov9" title="48">{
+        if source.size &lt; source.maxSize </span><span class="cov9" title="42">{
+                return true
+        }</span>
+        <span class="cov5" title="6">return false</span>
+}
+
+type infiniteSourceMock struct {
+        size int
+}
+
+func (source *infiniteSourceMock) Next() int <span class="cov9" title="51">{
+        source.size++
+        value := source.size
+        return value
+}</span>
+
+func (source *infiniteSourceMock) HasNext() bool <span class="cov10" title="54">{
+        return true
+}</span>
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">package streams
+
+// emptyPipeline returns the initial pipeline of the stream.
+func emptyPipeline[T any](source *source[T]) func() (T, bool) <span class="cov6" title="24">{
+        return func() (T, bool) </span><span class="cov10" title="167">{
+                return source.next(), true
+        }</span>
+}
+
+type operation[T any, U any] struct {
+        operator func(x T) U
+        next     *operation[U, interface{}]
+}
+</pre>
+		
+		<pre class="file" id="file3" style="display: none">package streams
+
+import "github.com/phantom820/collections/errors"
+
+type Source[T any] interface {
+        Next() T
+        HasNext() bool
+}
+
+// source a sequential stream source.
+type source[T any] struct {
+        next    func() T
+        hasNext func() bool
+}
+
+// NewSource creates a new source. Where elements are generated by the next function and end of the source is checked by has next function. The source
+// can be finite/infinite. When using an infinite source a limit operation can be used to avoid infinite loops in invoking a terminal operation.
+func NewSource[T any](next func() T, hasNext func() bool) *source[T] <span class="cov0" title="0">{
+        return &amp;source[T]{next: next, hasNext: hasNext}
+}</span>
+
+// newSource creates a new source.
+func newSource[T any](next func() T, hasNext func() bool) *source[T] <span class="cov9" title="21">{
+        return &amp;source[T]{next: next, hasNext: hasNext}
+}</span>
+
+// newSourceFromSlice creates a source from a slice.
+func newSourceFromSlice[T any](f func() []T) *source[T] <span class="cov3" title="3">{
+        var data []T
+        initialized := false
+        i := 0
+        hasNext := func() bool </span><span class="cov10" title="29">{
+                if !initialized </span><span class="cov3" title="3">{
+                        initialized = true
+                        data = f()
+                }</span>
+                <span class="cov10" title="29">if data == nil || i &gt;= len(data) </span><span class="cov3" title="3">{
+                        return false
+                }</span>
+                <span class="cov9" title="26">return true</span>
+        }
+        <span class="cov3" title="3">next := func() T </span><span class="cov7" title="13">{
+                if !hasNext() </span><span class="cov0" title="0">{
+                        panic(errors.ErrNoNextElement())</span>
+                }
+                <span class="cov7" title="13">element := data[i]
+                i++
+                return element</span>
+        }
+        <span class="cov3" title="3">source := source[T]{next: next, hasNext: hasNext}
+        return &amp;source</span>
+}
+</pre>
+		
+		<pre class="file" id="file4" style="display: none">// package streams provides java motivated stream implementation.
+package streams
+
+import (
+        "fmt"
+
+        "github.com/phantom820/collections"
+        "github.com/phantom820/collections/lists/list"
+        "github.com/phantom820/collections/sets/hashset"
+        "github.com/phantom820/collections/sets/treeset"
+        "github.com/phantom820/collections/types"
+)
+
+// Stream interface. Any modifications made to the source before the stream is terminated will be visible
+// to the stream. We lose the concrete type of stream elements once a map operation is invoked and it falls on the user to
+// perform the relevant type casts :( .
+type Stream[T any] interface {
+
+        // Intermediate operations.
+        Filter(f func(x T) bool) Stream[T]                               // Returns a stream consisting of the elements of this stream that match the given predicate.
+        Map(f func(x T) interface{}) Stream[interface{}]                 // Returns a stream consisting of the results of applying the given function to the elements of the stream.
+        Limit(n int) Stream[T]                                           // Returns a stream consisting of the elements of the stream but only limited to processing n elements.
+        Skip(n int) Stream[T]                                            // Returns a stream that skips the first n elements it encounters in processing.
+        Distinct(equals func(x, y T) bool, hash func(x T) int) Stream[T] // Returns a stream consisting of distinct elements. Elements are distinguished using equality and hash code.
+
+        // Terminal operations.
+        ForEach(f func(x T))                                   // Performs an action specified by the function f for each element of this stream.
+        Count() int                                            // Returns a count of how many are processed by the stream.
+        Reduce(f func(x, y T) interface{}) (interface{}, bool) // Returns the result of applying the associative binary function on elements of the stream. The binary operator is only applied if the are
+        // at least 2 elements in the stream, otherwise the returned result is invalid and will be indicated by the second returned value.
+
+        // Util.
+        Terminated() bool // Checks if a terminal operation has been invoked on the stream.
+
+}
+
+// terinationStatus only exists as means to share the termination status across parent and child streams.
+type terminationStatus struct {
+        status bool
+}
+
+// stream struct to represent a stream. For a given source any modifications made to it before the stream is terminated will be visible
+// to the stream.
+type stream[T any] struct {
+        distinct          bool               // indicates if the stream consist of distinct elements only , i.e say we constructed this from a set.
+        terminationStatus *terminationStatus // indicates whether a terminal operation was invoked on the stream.
+        // isTerminated      func() bool        // checks if the stream has been terminated or any stream it was derived from/ stream derived from it.
+        closed    bool             // indicates whether the stream has been closed , all streams are auto closed once a terminal operation is invoked.
+        completed func() bool      // checks if the stream has completed processing all elements.
+        source    *source[T]       // the source that produces elements for the stream.
+        pipeline  func() (T, bool) // pipeline of the operations.
+}
+
+// terminate this terinates the stream and sets its source to nil.
+func (stream *stream[T]) terminate() <span class="cov6" title="22">{
+        stream.terminationStatus.status = true
+        stream.closed = true
+        stream.source = nil
+        stream.pipeline = nil
+        stream.completed = nil
+}</span>
+
+// isTerminated checks if the stream or its parent has been terminated.
+func (stream *stream[T]) Terminated() bool <span class="cov8" title="83">{
+        return stream.terminationStatus.status
+}</span>
+
+// getPipeline returns the pipeline of operations of the stream.
+func (stream *stream[T]) getPipeline() func() (T, bool) <span class="cov10" title="200">{
+        return stream.pipeline
+}</span>
+
+// FromSource creates a stream from the given source. The source can be finite/ infinite.
+func FromSource[T any](source Source[T]) Stream[T] <span class="cov5" title="12">{
+        _source := newSource(func() T </span><span class="cov8" title="92">{ return source.Next() }</span>, func() bool <span class="cov8" title="102">{ return source.HasNext() }</span>)
+        <span class="cov5" title="12">terminationStatus := terminationStatus{false}
+        stream := &amp;stream[T]{
+                source:            _source,
+                pipeline:          emptyPipeline(_source),
+                completed:         func() bool </span><span class="cov8" title="102">{ return !(_source.hasNext()) }</span>,
+                terminationStatus: &amp;terminationStatus,
+        }
+        <span class="cov5" title="12">return stream</span>
+}
+
+// FromSet creates a stream from the given set. All changes made to the set before the stream is terminated
+// are visible to the stream. We currently do not need this.
+// func FromSet[T types.Equitable[T]](set sets.Set[T]) Stream[T] {
+//         it := set.Iterator()
+//         source := newSource(it.Next, it.HasNext)
+//         terminated := false
+//         stream := &amp;stream[T]{
+//                 source:           source,
+//                 distinct:         true,
+//                 pipeline:         emptyPipeline(source),
+//                 completed:        func() bool { return !(source.hasNext()) },
+//                 terminated:       &amp;terminated,
+//                 parentTerminated: &amp;terminated,
+//         }
+//         return stream
+// }
+
+// FromCollection creates a stream from the given collection. All changes made to the collection before the stream is terminated
+// are visible to the stream. Creating from a specific collection is recommended i.e FromSet .
+func FromCollection[T types.Equitable[T]](collection collections.Collection[T]) Stream[T] <span class="cov4" title="9">{
+        it := collection.Iterator()
+        source := newSource(it.Next, it.HasNext)
+        terminationStatus := terminationStatus{false}
+        stream := &amp;stream[T]{
+                source:            source,
+                pipeline:          emptyPipeline(source),
+                completed:         func() bool </span><span class="cov8" title="71">{ return !(source.hasNext()) }</span>,
+                terminationStatus: &amp;terminationStatus,
+        }
+        <span class="cov4" title="9">return stream</span>
+}
+
+// FromSlice creates a stream by using the callback to retrieve the underlying slice. All changes made to the slice before the stream is terminated
+// are visible to the stream.
+func FromSlice[T any](f func() []T) Stream[T] <span class="cov2" title="3">{
+        source := newSourceFromSlice(f)
+        terminationStatus := terminationStatus{false}
+        stream := stream[T]{
+                source:            source,
+                pipeline:          emptyPipeline(source),
+                completed:         func() bool </span><span class="cov5" title="16">{ return !(source.hasNext()) }</span>,
+                terminationStatus: &amp;terminationStatus,
+        }
+        <span class="cov2" title="3">return &amp;stream</span>
+}
+
+// Map returns a stream containing the results of applying the given mapping function to the elements of the stream. Applying this operation results in
+// the underlying type of the stream being an interface since receiver methods do not support generic types.
+func (inputStream *stream[T]) Map(f func(x T) interface{}) Stream[interface{}] <span class="cov3" title="4">{
+        if inputStream.Terminated() </span><span class="cov1" title="1">{
+                panic(ErrStreamTerminated())</span>
+        }
+        <span class="cov2" title="3">newStream := stream[interface{}]{
+                pipeline: func() (interface{}, bool) </span><span class="cov7" title="47">{
+                        element, ok := inputStream.getPipeline()()
+                        if !ok </span><span class="cov6" title="27">{
+                                var sentinel interface{}
+                                return sentinel, ok
+                        }</span>
+                        <span class="cov6" title="20">return f(element), ok</span>
+                },
+                distinct:          false,
+                completed:         inputStream.completed,
+                terminationStatus: inputStream.terminationStatus,
+        }
+        <span class="cov2" title="3">return &amp;newStream</span>
+}
+
+// Filter returns a stream consisting of the elements of the stream that match the given predicate.
+func (inputStream *stream[T]) Filter(f func(x T) bool) Stream[T] <span class="cov3" title="4">{
+        if inputStream.Terminated() </span><span class="cov1" title="1">{
+                panic(ErrStreamTerminated())</span>
+        }
+        <span class="cov2" title="3">newStream := stream[T]{
+                pipeline: func() (T, bool) </span><span class="cov7" title="47">{
+                        element, ok := inputStream.getPipeline()()
+                        if !ok </span><span class="cov4" title="10">{
+                                var sentinel T
+                                return sentinel, ok
+                        }</span> else<span class="cov7" title="37"> if !f(element) </span><span class="cov6" title="19">{
+                                var sentinel T
+                                return sentinel, false
+                        }</span>
+                        <span class="cov5" title="18">return element, true</span>
+                },
+                distinct:          inputStream.distinct,
+                completed:         inputStream.completed,
+                terminationStatus: inputStream.terminationStatus,
+        }
+        <span class="cov2" title="3">return &amp;newStream</span>
+}
+
+// Returns a stream that is limited to only producing n elements. Will panic if limit is negative.
+func (inputStream *stream[T]) Limit(limit int) Stream[T] <span class="cov4" title="6">{
+        if inputStream.Terminated() </span><span class="cov1" title="1">{
+                panic(ErrStreamTerminated())</span>
+        } else<span class="cov3" title="5"> if limit &lt; 0 </span><span class="cov1" title="1">{
+                panic(ErrIllegalArgument("Limit", fmt.Sprint(limit)))</span>
+        }
+        <span class="cov3" title="4">n := 0
+        newStream := stream[T]{
+                pipeline: func() (T, bool) </span><span class="cov7" title="53">{
+                        element, ok := inputStream.getPipeline()()
+                        if !ok </span><span class="cov6" title="27">{
+                                return element, ok
+                        }</span> else<span class="cov6" title="26"> {
+                                if n &lt; limit </span><span class="cov6" title="26">{
+                                        n++
+                                        return element, true
+                                }</span>
+                                <span class="cov0" title="0">return element, false</span>
+                        }
+                },
+                completed: func() bool <span class="cov7" title="57">{
+                        if inputStream.completed() || n &gt;= limit </span><span class="cov3" title="4">{
+                                return true
+                        }</span>
+                        <span class="cov7" title="53">return false</span>
+                },
+                distinct:          inputStream.distinct,
+                terminationStatus: inputStream.terminationStatus,
+        }
+        <span class="cov3" title="4">return &amp;newStream</span>
+}
+
+// Returns a stream that skips the first n elements in processing. Will panic if number of elements to skip is negative.
+func (inputStream *stream[T]) Skip(skip int) Stream[T] <span class="cov3" title="4">{
+        if inputStream.Terminated() </span><span class="cov1" title="1">{
+                panic(ErrStreamTerminated())</span>
+        } else<span class="cov2" title="3"> if skip &lt; 0 </span><span class="cov1" title="1">{
+                panic(ErrIllegalArgument("Skip", fmt.Sprint(skip)))</span>
+        }
+        <span class="cov2" title="2">skipped := 0
+        newStream := stream[T]{
+                pipeline: func() (T, bool) </span><span class="cov6" title="31">{
+                        element, ok := inputStream.getPipeline()()
+                        if !ok </span><span class="cov0" title="0">{
+                                return element, ok
+                        }</span> else<span class="cov6" title="31"> {
+                                if skipped &lt; skip </span><span class="cov5" title="12">{
+                                        skipped++
+                                        return element, false
+                                }</span>
+                                <span class="cov6" title="19">return element, true</span>
+                        }
+                },
+                distinct:          inputStream.distinct,
+                completed:         inputStream.completed,
+                terminationStatus: inputStream.terminationStatus,
+        }
+        <span class="cov2" title="2">return &amp;newStream</span>
+}
+
+// element this type allows us to use sets for the Distinct operation.
+type element[T any] struct {
+        value    T
+        equals   func(a, b T) bool
+        hashCode func(a T) int
+}
+
+// Equals required by Hashable for using a set.
+func (a element[T]) Equals(b element[T]) bool <span class="cov4" title="6">{
+        return a.equals(a.value, b.value)
+}</span>
+
+// HashCode produces the hash code of the element.
+func (a element[T]) HashCode() int <span class="cov6" title="24">{
+        return a.hashCode(a.value)
+}</span>
+
+// Distinct returns a stream consisting of distinct elements. Elements are distinguished using equality and hash code.
+func (inputStream *stream[T]) Distinct(equals func(x, y T) bool, hashCode func(x T) int) Stream[T] <span class="cov2" title="2">{
+        if inputStream.Terminated() </span><span class="cov1" title="1">{
+                panic(ErrStreamTerminated())</span>
+        }
+        <span class="cov1" title="1">set := hashset.New[element[T]]()
+        newStream := stream[T]{
+                pipeline: func() (T, bool) </span><span class="cov5" title="12">{
+                        item, ok := inputStream.pipeline()
+                        if !ok </span><span class="cov0" title="0">{
+                                return item, false
+                        }</span> else<span class="cov5" title="12"> if set.Contains(element[T]{value: item, equals: equals, hashCode: hashCode}) </span><span class="cov4" title="6">{
+                                var sentinel T
+                                return sentinel, false
+                        }</span>
+                        <span class="cov4" title="6">set.Add(element[T]{value: item, equals: equals, hashCode: hashCode})
+                        return item, true</span>
+                },
+                distinct:          true,
+                completed:         inputStream.completed,
+                terminationStatus: inputStream.terminationStatus,
+        }
+        <span class="cov1" title="1">return &amp;newStream</span>
+}
+
+// ForEach performs the given task on each element of the stream.
+func (stream *stream[T]) ForEach(f func(element T)) <span class="cov5" title="18">{
+        if stream.Terminated() </span><span class="cov1" title="1">{
+                panic(ErrStreamTerminated())</span>
+        }
+        <span class="cov5" title="17">defer stream.terminate()
+        pipeline := stream.getPipeline()
+        for !stream.completed() </span><span class="cov8" title="109">{
+                element, ok := pipeline()
+                if ok </span><span class="cov8" title="99">{
+                        f(element)
+                }</span>
+        }
+}
+
+// Count returns a count of how many elements are in the stream.
+func (stream *stream[T]) Count() int <span class="cov2" title="2">{
+        if stream.Terminated() </span><span class="cov1" title="1">{
+                panic(ErrStreamTerminated())</span>
+        }
+        <span class="cov1" title="1">defer stream.terminate()
+        count := 0
+        pipeline := stream.getPipeline()
+        for !stream.completed() </span><span class="cov4" title="6">{
+                _, ok := pipeline()
+                if ok </span><span class="cov4" title="6">{
+                        count++
+                }</span>
+        }
+        <span class="cov1" title="1">return count</span>
+}
+
+// Reduce returns the result of applying the associative binary function on elements of the stream. The binary operator is only applied if the are
+// at least 2 elements in the stream, otherwise the returned result is invalid and will be indicated by the second returned value.
+func (stream *stream[T]) Reduce(f func(x, y T) interface{}) (interface{}, bool) <span class="cov3" title="5">{
+        if stream.Terminated() </span><span class="cov1" title="1">{
+                panic(ErrStreamTerminated())</span>
+        }
+        <span class="cov3" title="4">defer stream.terminate()
+        pipeline := stream.getPipeline()
+        count := 0
+        var x, y T
+        for !stream.completed() </span><span class="cov7" title="52">{
+                element, ok := pipeline()
+                if ok </span><span class="cov6" title="25">{
+                        switch count </span>{
+                        case 0:<span class="cov3" title="4">
+                                x = element
+                                break</span>
+                        case 1:<span class="cov2" title="3">
+                                y = element
+                                x = f(x, y).(T)
+                                break</span>
+                        case 2:<span class="cov2" title="3">
+                                x = f(x, element).(T)
+                                break</span>
+                        default:<span class="cov5" title="15">
+                                x = f(x, element).(T)
+                                break</span>
+                        }
+                        <span class="cov6" title="25">count++</span>
+                }
+        }
+
+        <span class="cov3" title="4">if count &lt; 2 </span><span class="cov1" title="1">{
+                var zero T
+                return zero, false
+        }</span>
+
+        <span class="cov2" title="3">return x, true</span>
+}
+
+// ToSlice returns a slice containing the elements of the stream.
+func ToSlice[T any](stream Stream[T]) []T <span class="cov4" title="10">{
+        slice := make([]T, 0)
+        stream.ForEach(func(x T) </span><span class="cov7" title="55">{
+                slice = append(slice, x)
+        }</span>)
+        <span class="cov4" title="10">return slice</span>
+}
+
+// ToList returns a List containing the elements of the stream.
+func ToList[T types.Equitable[T]](stream Stream[T]) *list.List[T] <span class="cov3" title="4">{
+        list := list.New[T]()
+        stream.ForEach(func(x T) </span><span class="cov6" title="26">{
+                list.Add(x)
+        }</span>)
+        <span class="cov3" title="4">return list</span>
+}
+
+// ToHashSet returns a HashSet containing the elements of the stream.
+func ToHashSet[T types.Hashable[T]](stream Stream[T]) *hashset.HashSet[T] <span class="cov1" title="1">{
+        set := hashset.New[T]()
+        stream.ForEach(func(x T) </span><span class="cov4" title="6">{
+                set.Add(x)
+        }</span>)
+        <span class="cov1" title="1">return set</span>
+}
+
+// ToTreeSet returns a TreeSet containing the elements of the stream.
+func ToTreeSet[T types.Comparable[T]](stream Stream[T]) *treeset.TreeSet[T] <span class="cov1" title="1">{
+        set := treeset.New[T]()
+        stream.ForEach(func(x T) </span><span class="cov4" title="6">{
+                set.Add(x)
+        }</span>)
+        <span class="cov1" title="1">return set</span>
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

@@ -7,7 +7,7 @@ func emptyPipeline[T any](source *source[T]) func() (T, bool) {
 	}
 }
 
-// newPipeline returns a new pipeline which is of the form g(f), f is the current set of operations and g is a new operation to be added..
-func newPipeline[T any](f func() (T, bool), g func() (T, bool)) func() (T, bool) {
-	return nil
+type operation[T any, U any] struct {
+	operator func(x T) U
+	next     *operation[U, interface{}]
 }
