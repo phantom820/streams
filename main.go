@@ -30,4 +30,7 @@ func main() {
 	slice = slice[:4]
 	fmt.Println(streams.ToSlice(newStream))
 
+	sk := streams.ConcurrentFromSlice[int](func() []int { return slice }, 2)
+	sk.Count()
+
 }

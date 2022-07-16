@@ -392,6 +392,17 @@ func TestReduce(t *testing.T) {
 
 }
 
+func TestCollect(t *testing.T) {
+
+	source := finiteSourceMock{maxSize: 6}
+
+	stream := FromSource[int](&source)
+
+	// Case 1 : Just collect the stream to a slice.
+	assert.ElementsMatch(t, []int{1, 2, 3, 4, 5, 6}, stream.Collect())
+
+}
+
 func TestIntegration(t *testing.T) {
 
 	// Case 1 : Infinite stream -> filter out odd numbers and then get sum of first n even squares.
@@ -419,5 +430,46 @@ func TestIntegration(t *testing.T) {
 
 	assert.Equal(t, true, ok)
 	assert.Equal(t, "12, 15, 18, 21", str.(string))
+
+	// Case 3 : Finite stream -> distinct and count.
+	fruitStream := FromCollection[types.String](
+		list.New[types.String]("Apple", "Banana", "Orange", "Apple", "Kiwi", "Kiwi", "Orange", "Apple", "Watermelon"))
+
+	count := fruitStream.Distinct(func(x, y types.String) bool { return x == y }, func(x types.String) int { return x.HashCode() }).Count()
+	assert.Equal(t, 5, count)
+
+	// Case 4 : Finite stream -> filter, distinct and count.
+	fruitStream = FromCollection[types.String](
+		list.New[types.String]("Apple", "Banana", "Orange", "Apple", "Kiwi", "Kiwi", "Orange", "Apple", "Watermelon"))
+
+	count = fruitStream.Filter(func(x types.String) bool {
+		return x != "Banana"
+	}).Distinct(func(x, y types.String) bool {
+		return x == y
+	}, func(x types.String) int {
+		return x.HashCode()
+	}).Count()
+
+	assert.Equal(t, 4, count)
+
+	// Case 5 : Finite stream -> filter , skip .
+	fruitStream = FromCollection[types.String](
+		list.New[types.String]("Apple", "Banana", "Orange", "Apple", "Kiwi", "Kiwi", "Orange", "Apple", "Watermelon"))
+
+	count = fruitStream.Filter(func(x types.String) bool {
+		return x != "Banana"
+	}).Skip(2).Count()
+
+	assert.Equal(t, 6, count)
+
+	// Case 6 : Finite stream -> filter , limit .
+	fruitStream = FromCollection[types.String](
+		list.New[types.String]("Apple", "Banana", "Orange", "Apple", "Kiwi", "Kiwi", "Orange", "Apple", "Watermelon"))
+
+	count = fruitStream.Filter(func(x types.String) bool {
+		return x != "Banana"
+	}).Limit(4).Count()
+
+	assert.Equal(t, 4, count)
 
 }

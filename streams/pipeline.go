@@ -1,13 +1,18 @@
 package streams
 
+import "github.com/phantom820/streams/sources"
+
 // emptyPipeline returns the initial pipeline of the stream.
-func emptyPipeline[T any](source *source[T]) func() (T, bool) {
+func emptyPipeline[T any](source sources.Source[T]) func() (T, bool) {
 	return func() (T, bool) {
-		return source.next(), true
+		return source.Next(), true
 	}
+
 }
 
-type operation[T any, U any] struct {
-	operator func(x T) U
-	next     *operation[U, interface{}]
+// emptyPipeline returns the initial pipeline of the stream.
+func emptyConcurrentPipeline[T any](source sources.ConcurrentSource[T]) func(i int) (T, bool) {
+	return func(i int) (T, bool) {
+		return source.GetPartition(i).Next(), true
+	}
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/phantom820/collections/sets/hashset"
 	"github.com/phantom820/collections/sets/treeset"
 	"github.com/phantom820/collections/types"
+	"github.com/phantom820/streams/sources"
 )
 
 // Stream interface. Any modifications made to the source before the stream is terminated will be visible
@@ -28,6 +29,7 @@ type Stream[T any] interface {
 	Count() int                                            // Returns a count of how many are processed by the stream.
 	Reduce(f func(x, y T) interface{}) (interface{}, bool) // Returns the result of applying the associative binary function on elements of the stream. The binary operator is only applied if the are
 	// at least 2 elements in the stream, otherwise the returned result is invalid and will be indicated by the second returned value.
+	Collect() []T // Returns a slice containing the elements from the stream
 
 	// Util.
 	Terminated() bool // Checks if a terminal operation has been invoked on the stream.
@@ -40,15 +42,15 @@ type terminationStatus struct {
 }
 
 // stream struct to represent a stream. For a given source any modifications made to it before the stream is terminated will be visible
-// to the stream.
+// to the stream. A source can be finite/infinite. To avoid infinite loops the limit operation must be applied to the stream.
 type stream[T any] struct {
 	distinct          bool               // indicates if the stream consist of distinct elements only , i.e say we constructed this from a set.
 	terminationStatus *terminationStatus // indicates whether a terminal operation was invoked on the stream.
-	// isTerminated      func() bool        // checks if the stream has been terminated or any stream it was derived from/ stream derived from it.
-	closed    bool             // indicates whether the stream has been closed , all streams are auto closed once a terminal operation is invoked.
-	completed func() bool      // checks if the stream has completed processing all elements.
-	source    *source[T]       // the source that produces elements for the stream.
-	pipeline  func() (T, bool) // pipeline of the operations.
+	concurrent        bool
+	closed            bool              // indicates whether the stream has been closed , all streams are auto closed once a terminal operation is invoked.
+	completed         func() bool       // checks if the stream has completed processing all elements.
+	source            sources.Source[T] // the source that produces elements for the stream.
+	pipeline          func() (T, bool)  // pipeline of the operations.
 }
 
 // terminate this terinates the stream and sets its source to nil.
@@ -71,13 +73,12 @@ func (stream *stream[T]) getPipeline() func() (T, bool) {
 }
 
 // FromSource creates a stream from the given source. The source can be finite/ infinite.
-func FromSource[T any](source Source[T]) Stream[T] {
-	_source := newSource(func() T { return source.Next() }, func() bool { return source.HasNext() })
+func FromSource[T any](source sources.Source[T]) Stream[T] {
 	terminationStatus := terminationStatus{false}
 	stream := &stream[T]{
-		source:            _source,
-		pipeline:          emptyPipeline(_source),
-		completed:         func() bool { return !(_source.hasNext()) },
+		source:            source,
+		pipeline:          emptyPipeline(source),
+		completed:         func() bool { return !(source.HasNext()) },
 		terminationStatus: &terminationStatus,
 	}
 	return stream
@@ -104,12 +105,12 @@ func FromSource[T any](source Source[T]) Stream[T] {
 // are visible to the stream. Creating from a specific collection is recommended i.e FromSet .
 func FromCollection[T types.Equitable[T]](collection collections.Collection[T]) Stream[T] {
 	it := collection.Iterator()
-	source := newSource(it.Next, it.HasNext)
+	source := sources.NewSource(it.Next, it.HasNext)
 	terminationStatus := terminationStatus{false}
 	stream := &stream[T]{
 		source:            source,
 		pipeline:          emptyPipeline(source),
-		completed:         func() bool { return !(source.hasNext()) },
+		completed:         func() bool { return !(source.HasNext()) },
 		terminationStatus: &terminationStatus,
 	}
 	return stream
@@ -118,12 +119,12 @@ func FromCollection[T types.Equitable[T]](collection collections.Collection[T]) 
 // FromSlice creates a stream by using the callback to retrieve the underlying slice. All changes made to the slice before the stream is terminated
 // are visible to the stream.
 func FromSlice[T any](f func() []T) Stream[T] {
-	source := newSourceFromSlice(f)
+	source := sources.NewSourceFromSlice(f)
 	terminationStatus := terminationStatus{false}
 	stream := stream[T]{
 		source:            source,
 		pipeline:          emptyPipeline(source),
-		completed:         func() bool { return !(source.hasNext()) },
+		completed:         func() bool { return !(source.HasNext()) },
 		terminationStatus: &terminationStatus,
 	}
 	return &stream
@@ -218,7 +219,7 @@ func (inputStream *stream[T]) Skip(skip int) Stream[T] {
 	skipped := 0
 	newStream := stream[T]{
 		pipeline: func() (T, bool) {
-			element, ok := inputStream.getPipeline()()
+			element, ok := inputStream.pipeline()
 			if !ok {
 				return element, ok
 			} else {
@@ -348,6 +349,15 @@ func (stream *stream[T]) Reduce(f func(x, y T) interface{}) (interface{}, bool) 
 	}
 
 	return x, true
+}
+
+// Collect returns a slice containing the output elements of the stream.
+func (stream *stream[T]) Collect() []T {
+	slice := make([]T, 0)
+	stream.ForEach(func(element T) {
+		slice = append(slice, element)
+	})
+	return slice
 }
 
 // ToSlice returns a slice containing the elements of the stream.
