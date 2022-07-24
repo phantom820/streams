@@ -1,3 +1,5 @@
+// package source provides an implementation of a producer of elements for a stream , a normal source will be used with a sequential stream while
+// a partitioned source is to be used with a concurrent stream. A source can be finite/infinite while a partitioned source should always be finite.
 package sources
 
 import (

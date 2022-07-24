@@ -1,3 +1,5 @@
+// package stream brings a java streams like API to go which can be used to do more functional programming and avoid materialization consists
+// when manipulating collections / slices.
 package streams
 
 import (
