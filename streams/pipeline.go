@@ -2,7 +2,7 @@ package streams
 
 import "github.com/phantom820/streams/sources"
 
-// emptyPipeline returns the initial pipeline of the stream.
+// emptyPipeline returns the initial pipeline for a stream.
 func emptyPipeline[T any](source sources.Source[T]) func() (T, bool) {
 	return func() (T, bool) {
 		return source.Next(), true
@@ -10,9 +10,9 @@ func emptyPipeline[T any](source sources.Source[T]) func() (T, bool) {
 
 }
 
-// emptyPipeline returns the initial pipeline of the stream.
-func emptyConcurrentPipeline[T any](source sources.ConcurrentSource[T]) func(i int) (T, bool) {
+// emptyConcurrentPipeline returns the initial pipeline for a concurrent stream.
+func emptyConcurrentPipeline[T any](source sources.PartionedSource[T]) func(i int) (T, bool) {
 	return func(i int) (T, bool) {
-		return source.GetPartition(i).Next(), true
+		return source.At(i).Next(), true
 	}
 }

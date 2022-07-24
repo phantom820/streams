@@ -6,54 +6,53 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestPartitionSource(t *testing.T) {
+type finiteSourceMock struct {
+	value    int
+	maxValue int
+}
 
-	source := finiteSourceMock{maxSize: 10}
+func (source *finiteSourceMock) Next() int {
+	source.value++
+	value := source.value
+	return value
+}
 
-	// Case 1 : Perfect fit partition.
-	sources := partitionSource[int](&source, 2)
-	a := make([]int, 0)
-	b := make([]int, 0)
-
-	for i, s := range sources {
-		for s.HasNext() {
-			if i == 0 {
-				a = append(a, s.Next())
-			} else {
-				b = append(b, s.Next())
-			}
-		}
+func (source *finiteSourceMock) HasNext() bool {
+	if source.value < source.maxValue {
+		return true
 	}
+	return false
+}
 
-	assert.ElementsMatch(t, []int{1, 2, 3, 4, 5}, a)
-	assert.ElementsMatch(t, []int{6, 7, 8, 9, 10}, b)
+func TestPartition(t *testing.T) {
 
-	// Case 2 : Imperfect partition.
+	source := finiteSourceMock{maxValue: 1000}
 
-	source = finiteSourceMock{maxSize: 10}
-	sources = partitionSource[int](&source, 3)
-	a = make([]int, 0)
-	b = make([]int, 0)
-	c := make([]int, 0)
-	d := make([]int, 0)
+	// Case 1 : Partition into a perfect fit.
+	partitionedSource := NewPartitionedSource[int](&source)
+	partitionedSource.Partition(4)
+	assert.Equal(t, 4, partitionedSource.Len())
 
-	for i, s := range sources {
-		for s.HasNext() {
-			if i == 0 {
-				a = append(a, s.Next())
-			} else if i == 1 {
-				b = append(b, s.Next())
-			} else if i == 2 {
-				c = append(c, s.Next())
-			} else {
-				d = append(d, s.Next())
+	// Case 2 : Partition into an imperfect fit.
+	source = finiteSourceMock{maxValue: 1000}
+	partitionedSource.Partition(6)
+	assert.Equal(t, 6, partitionedSource.Len())
+
+	// Case 3 : Elements of individual partitions.
+	source = finiteSourceMock{maxValue: 10}
+	partitionedSource.Partition(3)
+
+	assert.Equal(t, []int{1, 2, 3, 4}, collectSource(partitionedSource.At(0)))
+	assert.Equal(t, []int{5, 6, 7, 8}, collectSource(partitionedSource.At(1)))
+	assert.Equal(t, []int{9, 10}, collectSource(partitionedSource.At(2)))
+
+	t.Run("Access out of bounds.", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				assert.NotNil(t, r.(error))
 			}
-		}
-	}
-
-	assert.ElementsMatch(t, []int{1, 2, 3}, a)
-	assert.ElementsMatch(t, []int{4, 5, 6}, b)
-	assert.ElementsMatch(t, []int{7, 8, 9}, c)
-	assert.ElementsMatch(t, []int{10}, d)
+		}()
+		partitionedSource.At(3)
+	})
 
 }

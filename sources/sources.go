@@ -1,55 +1,76 @@
 package sources
 
-import "github.com/phantom820/collections/errors"
+import (
+	"errors"
+	"fmt"
+	"math"
+)
 
-// Source a source for a sequential stream. This can be finite/infinite. An infinite source may lead to infinite loops if not handled properly.
-// A limit operation should be applied on a stream derived from an infinite source.
+// Source a source of elements for a stream. Sources can come from a slice, collection etc and can be finite/infinite/
 type Source[T any] interface {
 	Next() T       // Returns the next element from the source.
 	HasNext() bool // Checks if the Source has a next element to produce.
 }
 
-// ConcurrentSource a source for a concurrent stream. This should always be finite.
-type ConcurrentSource[T any] interface {
-	GetPartition(i int) Source[T]
-	Partition(n int) int
+// PartitionedSource a source that is made up of disjoint sources that can be processed independently.
+type PartionedSource[T any] interface {
+	At(i int) Source[T]  // Returns the i'th partition of the source.
+	Len() int            // Returns the number of partitions the source has.
+	Partition(n int) int // Partitions the source into n parttions
 }
 
-// concurrentSource a concurrent stream source to be used by concurrent streams.
-type concurrentSource[T any] struct {
-	source  Source[T]   // The source to be partitioned.
-	n       int         // The number of partitions to be made from the source.
-	sources []Source[T] // n partitions of the source.
-}
-
-func (source *concurrentSource[T]) GetPartition(i int) Source[T] {
-	return source.sources[i]
-}
-
-// partitionSource partitions a source into n partitions. For internal use to make concurrent streams.
-func partitionSource[T any](source Source[T], n int) []Source[T] {
+// collectSource returns a slice containing all the elements from the source.
+func collectSource[T any](source Source[T]) []T {
 	data := make([]T, 0)
 	for source.HasNext() {
 		data = append(data, source.Next())
 	}
-	partitionSize := len(data) / n // Do we need smarter ways of picking the partition size here.
+	return data
+}
+
+// NewPartitionedSource creates a new partitioned source from the given source.
+func NewPartitionedSource[T any](source Source[T]) PartionedSource[T] {
+	return &partitionedSource[T]{source: source, sources: make([]Source[T], 0)}
+}
+
+// partitionedSource a source that is made up of disjoint sources that can be processed independently.
+type partitionedSource[T any] struct {
+	source  Source[T]
+	sources []Source[T]
+}
+
+// Partition returns a partioned source with na partitions. The input source must be finite otherwise will run into an infinite loop when trying
+// to collect it into a slice.
+func (partitionedSource *partitionedSource[T]) Partition(n int) int {
+	data := collectSource(partitionedSource.source)
+	partitionSize := int(math.Ceil(float64(len(data)) / float64(n))) // Do we need smarter ways of picking the partition size here.
 	sources := make([]Source[T], 0)
 	for i := 0; i < len(data); i = i + partitionSize {
-		partition := data[i : i+partitionSize]
+		var partition []T
 		if i+partitionSize >= len(data) {
 			partition = data[i:]
+		} else {
+			partition = data[i : i+partitionSize]
 		}
 		source := NewSourceFromSlice(func() []T { return partition })
 		sources = append(sources, source)
 	}
-	return sources
+	partitionedSource.sources = sources
+	return len(sources)
 }
 
-// Partition partitions the source into n partitions.
-func (source *concurrentSource[T]) Partition(n int) int {
-	sources := partitionSource[T](source.source, n)
-	source.sources = sources
-	return len(sources)
+// At returns the partition at the i'th index and will panic if the index is out of bounds.
+func (partitionedSource *partitionedSource[T]) At(i int) Source[T] {
+	if i >= len(partitionedSource.sources) {
+		err := fmt.Sprintf("ErrIndexOutOfBounds: Index: %v, Size: %v", i, len(partitionedSource.sources))
+		panic(errors.New(err))
+	}
+	return partitionedSource.sources[i]
+}
+
+// Len returns the number of partitions the source has.
+func (partitionedSource *partitionedSource[T]) Len() int {
+	return len(partitionedSource.sources)
 }
 
 // source a sequential stream source.
@@ -58,7 +79,7 @@ type source[T any] struct {
 	hasNext func() bool
 }
 
-// HasNext checks if the source has a next element to yield.
+// HasNext checks if the source has a next element to produce.
 func (source *source[T]) HasNext() bool {
 	return source.hasNext()
 }
@@ -66,11 +87,6 @@ func (source *source[T]) HasNext() bool {
 // Next returns the next element from the source.
 func (source *source[T]) Next() T {
 	return source.next()
-}
-
-// NewConcurrentSource creates a concurrent source by partitioning the given source into n partitions.
-func NewConcurrentSource[T any](source Source[T]) ConcurrentSource[T] {
-	return &concurrentSource[T]{source: source}
 }
 
 // NewSource creates a new sequential source.
@@ -95,7 +111,7 @@ func NewSourceFromSlice[T any](f func() []T) Source[T] {
 	}
 	next := func() T {
 		if !hasNext() {
-			panic(errors.ErrNoNextElement())
+			panic(errors.New("ErrNoNextElement"))
 		}
 		element := data[i]
 		i++

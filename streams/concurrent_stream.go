@@ -4,6 +4,7 @@ package streams
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/phantom820/collections"
 	"github.com/phantom820/collections/sets/hashset"
@@ -11,32 +12,57 @@ import (
 	"github.com/phantom820/streams/sources"
 )
 
-// ConcurrentStream interface. Any modifications made to the source before the stream is terminated will be visible
-// to the stream. We lose the concrete type of stream elements once a map operation is invoked and it falls on the user to
-// perform the relevant type casts :( .
-// concurrentStream struct to represent a stream. For a given source any modifications made to it before the stream is terminated will be visible
-// to the stream. The source has to be finite.
+// concurrentSTream represent a stream implementation in which elements can be operated on concurrently. The underlying source has to be finite in order
+// to avoid an infinite loop when trying to split stream elements for concurrent processing.
 type concurrentStream[T any] struct {
-	maxcConcurrency   int                   // maximum number of partitions that can be made.
-	distinct          bool                  // indicates if the stream consist of distinct elements only , i.e say we constructed this from a set.
-	terminationStatus *terminationStatus    // indicates whether a terminal operation was invoked on the stream.
-	closed            bool                  // indicates whether the stream has been closed , all streams are auto closed once a terminal operation is invoked.
-	completed         func(i int) bool      // checks if the stream has completed processing all elements.
-	pipeline          func(i int) (T, bool) // pipeline of the operations.
-	partition         func() int            // partitions the source and returns the number of partitions/
+	maxcConcurrency int                   // maximum number of go routines to use when processing the stream
+	distinct        bool                  // indicates if the stream consist of distinct elements only , i.e say we constructed this from a set.
+	terminated      bool                  // indicates whether a terminal operation was invoked on the stream.
+	closed          bool                  // indicates whether the stream has been closed , all streams are auto closed once a terminal operation is invoked.
+	completed       func(i int) bool      // checks if the stream has completed processing all elements.
+	pipeline        func(i int) (T, bool) // pipeline of the operations.
+	partition       func() int            // partitions the source and returns the number of partitions.
 }
 
 // terminate this terinates the stream and sets its source to nil.
 func (stream *concurrentStream[T]) terminate() {
-	stream.terminationStatus.status = true
+	stream.terminated = true
 	stream.closed = true
 	stream.pipeline = nil
 	stream.completed = nil
+	stream.partition = nil
 }
 
-// isTerminated checks if the stream or its parent has been terminated.
+// closes the stream, i,e another stream has been derived from it.
+func (stream *concurrentStream[T]) close() {
+	stream.closed = true
+}
+
+// Concurrent always returns false for a sequential stream.
+func (stream *concurrentStream[T]) Concurrent() bool {
+	return true
+}
+
+// Terminated checks if a terminal operation has been invoked on the stream.
 func (stream *concurrentStream[T]) Terminated() bool {
-	return stream.terminationStatus.status
+	return stream.terminated
+}
+
+// Closed check if the stream has been closed, a stream is closed when another stream was derived from it, a terminated stream is closed also.
+func (stream *concurrentStream[T]) Closed() bool {
+	return stream.closed
+}
+
+// valid if a stream is valid for any type of operation.
+func (stream *concurrentStream[T]) valid() (bool, *Error) {
+	if stream.Terminated() {
+		err := ErrStreamTerminated()
+		return false, &err
+	} else if stream.Closed() {
+		err := ErrStreamClosed()
+		return false, &err
+	}
+	return true, nil
 }
 
 // getPipeline returns the pipeline of operations of the stream.
@@ -44,43 +70,51 @@ func (stream *concurrentStream[T]) getPipeline() func(i int) (T, bool) {
 	return stream.pipeline
 }
 
-// FromCollection creates a stream from the given collection. All changes made to the collection before the stream is terminated
-// are visible to the stream. Creating from a specific collection is recommended i.e FromSet .
-func ConcurrentFromCollection[T types.Equitable[T]](collection collections.Collection[T], maxConcurrecny int) Stream[T] {
+//  concurrentFromCollection creates a sconcurrent tream from the given collection. All changes made to the collection before the stream is terminated
+// are visible to the stream
+func concurrentFromCollection[T types.Equitable[T]](collection collections.Collection[T], maxConcurrency int) Stream[T] {
 	it := collection.Iterator()
 	source := sources.NewSource(it.Next, it.HasNext)
-	concurrentSource := sources.NewConcurrentSource(source)
-	terminationStatus := terminationStatus{false}
+	concurrentSource := sources.NewPartitionedSource(source)
 	stream := &concurrentStream[T]{
-		pipeline:          emptyConcurrentPipeline(concurrentSource),
-		completed:         func(i int) bool { return !(concurrentSource.GetPartition(i).HasNext()) },
-		terminationStatus: &terminationStatus,
-		partition:         func() int { return concurrentSource.Partition(maxConcurrecny) },
+		pipeline:  emptyConcurrentPipeline(concurrentSource),
+		completed: func(i int) bool { return !(concurrentSource.At(i).HasNext()) },
+		partition: func() int { return concurrentSource.Partition(maxConcurrency) },
 	}
 	return stream
 }
 
-// FromSlice creates a stream by using the callback to retrieve the underlying slice. All changes made to the slice before the stream is terminated
+// concurrentFromSlice creates a concurrent stream by using the callback to retrieve the underlying slice. All changes made to the slice before the stream is terminated
 // are visible to the stream.
-func ConcurrentFromSlice[T any](f func() []T, maxConcurrency int) Stream[T] {
+func concurrentFromSlice[T any](f func() []T, maxConcurrency int) Stream[T] {
 	source := sources.NewSourceFromSlice(f)
-	concurrentSource := sources.NewConcurrentSource(source)
-	terminationStatus := terminationStatus{false}
+	concurrentSource := sources.NewPartitionedSource(source)
 	stream := concurrentStream[T]{
-		pipeline:          emptyConcurrentPipeline(concurrentSource),
-		completed:         func(i int) bool { return !(concurrentSource.GetPartition(i).HasNext()) },
-		terminationStatus: &terminationStatus,
-		partition:         func() int { return concurrentSource.Partition(maxConcurrency) },
+		pipeline:  emptyConcurrentPipeline(concurrentSource),
+		completed: func(i int) bool { return !(concurrentSource.At(i).HasNext()) },
+		partition: func() int { return concurrentSource.Partition(maxConcurrency) },
 	}
 	return &stream
+}
+
+// concurrentFromSource creates a concurrent stream from the given source.
+func concurrentFromSource[T any](source sources.Source[T], maxConcurrency int) Stream[T] {
+	concurrentSource := sources.NewPartitionedSource(source)
+	stream := &concurrentStream[T]{
+		pipeline:  emptyConcurrentPipeline(concurrentSource),
+		completed: func(i int) bool { return !(concurrentSource.At(i).HasNext()) },
+		partition: func() int { return concurrentSource.Partition(maxConcurrency) },
+	}
+	return stream
 }
 
 // Map returns a stream containing the results of applying the given mapping function to the elements of the stream. Applying this operation results in
 // the underlying type of the stream being an interface since receiver methods do not support generic types.
 func (inputStream *concurrentStream[T]) Map(f func(x T) interface{}) Stream[interface{}] {
-	if inputStream.Terminated() {
-		panic(ErrStreamTerminated())
+	if ok, err := inputStream.valid(); !ok {
+		panic(err)
 	}
+	defer inputStream.close()
 	newStream := concurrentStream[interface{}]{
 		pipeline: func(i int) (interface{}, bool) {
 			element, ok := inputStream.pipeline(i)
@@ -90,18 +124,19 @@ func (inputStream *concurrentStream[T]) Map(f func(x T) interface{}) Stream[inte
 			}
 			return f(element), ok
 		},
-		distinct:          false,
-		completed:         inputStream.completed,
-		terminationStatus: inputStream.terminationStatus,
+		distinct:  false,
+		completed: inputStream.completed,
+		partition: inputStream.partition,
 	}
 	return &newStream
 }
 
 // Filter returns a stream consisting of the elements of the stream that match the given predicate.
 func (inputStream *concurrentStream[T]) Filter(f func(x T) bool) Stream[T] {
-	if inputStream.Terminated() {
-		panic(ErrStreamTerminated())
+	if ok, err := inputStream.valid(); !ok {
+		panic(err)
 	}
+	defer inputStream.close()
 	newStream := concurrentStream[T]{
 		pipeline: func(i int) (T, bool) {
 			element, ok := inputStream.pipeline(i)
@@ -114,82 +149,94 @@ func (inputStream *concurrentStream[T]) Filter(f func(x T) bool) Stream[T] {
 			}
 			return element, true
 		},
-		distinct:          inputStream.distinct,
-		completed:         inputStream.completed,
-		terminationStatus: inputStream.terminationStatus,
+		distinct:  inputStream.distinct,
+		completed: inputStream.completed,
+		partition: inputStream.partition,
 	}
 	return &newStream
 }
 
 // Returns a stream that is limited to only producing n elements. Will panic if limit is negative.
 func (inputStream *concurrentStream[T]) Limit(limit int) Stream[T] {
-	if inputStream.Terminated() {
-		panic(ErrStreamTerminated())
+	if ok, err := inputStream.valid(); !ok {
+		panic(err)
 	} else if limit < 0 {
 		panic(ErrIllegalArgument("Limit", fmt.Sprint(limit)))
 	}
-	n := 0
+	defer inputStream.close()
+	var counter uint32
+	var mutex sync.Mutex
 	newStream := concurrentStream[T]{
 		pipeline: func(i int) (T, bool) {
+			mutex.Lock()
+			defer mutex.Unlock()
 			element, ok := inputStream.getPipeline()(i)
 			if !ok {
 				return element, ok
 			} else {
-				if n < limit {
-					n++
+				if int(atomic.LoadUint32(&counter)) < limit {
+					atomic.AddUint32(&counter, 1)
 					return element, true
 				}
 				return element, false
 			}
 		},
 		completed: func(i int) bool {
-			if inputStream.completed(i) || n >= limit {
+			if inputStream.completed(i) || int(atomic.LoadUint32(&counter)) >= limit {
 				return true
 			}
 			return false
 		},
-		distinct:          inputStream.distinct,
-		terminationStatus: inputStream.terminationStatus,
+		distinct:  inputStream.distinct,
+		partition: inputStream.partition,
 	}
 	return &newStream
 }
 
 // Returns a stream that skips the first n elements in processing. Will panic if number of elements to skip is negative.
 func (inputStream *concurrentStream[T]) Skip(skip int) Stream[T] {
-	if inputStream.Terminated() {
-		panic(ErrStreamTerminated())
+	if ok, err := inputStream.valid(); !ok {
+		panic(err)
 	} else if skip < 0 {
 		panic(ErrIllegalArgument("Skip", fmt.Sprint(skip)))
 	}
-	skipped := 0
+	defer inputStream.close()
+	var counter uint32
+	var mutex sync.Mutex
 	newStream := concurrentStream[T]{
 		pipeline: func(i int) (T, bool) {
+			mutex.Lock()
+			defer mutex.Unlock()
 			element, ok := inputStream.pipeline(i)
 			if !ok {
 				return element, ok
 			} else {
-				if skipped < skip {
-					skipped++
+				if int(atomic.LoadUint32(&counter)) < skip {
+					atomic.AddUint32(&counter, 1)
 					return element, false
 				}
 				return element, true
 			}
 		},
-		distinct:          inputStream.distinct,
-		completed:         inputStream.completed,
-		terminationStatus: inputStream.terminationStatus,
+		distinct:  inputStream.distinct,
+		completed: inputStream.completed,
+		partition: inputStream.partition,
 	}
 	return &newStream
 }
 
 // Distinct returns a stream consisting of distinct elements. Elements are distinguished using equality and hash code.
 func (inputStream *concurrentStream[T]) Distinct(equals func(x, y T) bool, hashCode func(x T) int) Stream[T] {
-	if inputStream.Terminated() {
-		panic(ErrStreamTerminated())
+	if ok, err := inputStream.valid(); !ok {
+		panic(err)
 	}
+	defer inputStream.close()
 	set := hashset.New[element[T]]()
+	var mutex sync.Mutex
 	newStream := concurrentStream[T]{
 		pipeline: func(i int) (T, bool) {
+			mutex.Lock()
+			defer mutex.Unlock()
 			item, ok := inputStream.pipeline(i)
 			if !ok {
 				return item, false
@@ -200,9 +247,9 @@ func (inputStream *concurrentStream[T]) Distinct(equals func(x, y T) bool, hashC
 			set.Add(element[T]{value: item, equals: equals, hashCode: hashCode})
 			return item, true
 		},
-		distinct:          true,
-		completed:         inputStream.completed,
-		terminationStatus: inputStream.terminationStatus,
+		distinct:  true,
+		completed: inputStream.completed,
+		partition: inputStream.partition,
 	}
 	return &newStream
 }
@@ -222,8 +269,8 @@ func collect[T any](wg *sync.WaitGroup, result chan []T, stream *concurrentStrea
 
 // ForEach performs the given task on each element of the stream.
 func (stream *concurrentStream[T]) ForEach(f func(element T)) {
-	if stream.Terminated() {
-		panic(ErrStreamTerminated())
+	if ok, err := stream.valid(); !ok {
+		panic(err)
 	}
 	defer stream.terminate()
 	var wg sync.WaitGroup
@@ -257,8 +304,8 @@ func count[T any](wg *sync.WaitGroup, result chan int, stream *concurrentStream[
 
 // Count returns a count of how many elements are in the stream.
 func (stream *concurrentStream[T]) Count() int {
-	if stream.Terminated() {
-		panic(ErrStreamTerminated())
+	if ok, err := stream.valid(); !ok {
+		panic(err)
 	}
 	defer stream.terminate()
 	var wg sync.WaitGroup
@@ -277,43 +324,69 @@ func (stream *concurrentStream[T]) Count() int {
 	return count
 }
 
+// reduce performs a reduction on a partition.
+func reduce[T any](wg *sync.WaitGroup, result chan T, stream *concurrentStream[T], f func(x, y T) T, i int) {
+	defer wg.Done()
+	pipeline := stream.pipeline
+	count := 0
+	var x, y T
+	for !stream.completed(i) {
+		element, ok := pipeline(i)
+		if ok {
+			switch count {
+			case 0:
+				x = element
+				break
+			case 1:
+				y = element
+				x = f(x, y)
+				break
+			case 2:
+				x = f(x, element)
+				break
+			default:
+				x = f(x, element)
+				break
+			}
+			count++
+		}
+	}
+	if count > 0 {
+		result <- x
+	}
+}
+
 // Reduce returns the result of applying the associative binary function on elements of the stream. The binary operator is only applied if the are
-// at least 2 elements in the stream, otherwise the returned result is invalid and will be indicated by the second returned value.
-func (stream *concurrentStream[T]) Reduce(f func(x, y T) interface{}) (interface{}, bool) {
-	if stream.Terminated() {
-		panic(ErrStreamTerminated())
+// at least 2 elements in the stream, in the case of 1 element , the element is returned. Otherwise the returned result is invalid and will be indicated by the second returned value.
+func (stream *concurrentStream[T]) Reduce(f func(x, y T) T) (T, bool) {
+	if ok, err := stream.valid(); !ok {
+		panic(err)
 	}
 	defer stream.terminate()
-	// pipeline := stream.getPipeline()
-	// count := 0
-	var x T
-	// for !stream.completed() {
-	// 	element, ok := pipeline()
-	// 	if ok {
-	// 		switch count {
-	// 		case 0:
-	// 			x = element
-	// 			break
-	// 		case 1:
-	// 			y = element
-	// 			x = f(x, y).(T)
-	// 			break
-	// 		case 2:
-	// 			x = f(x, element).(T)
-	// 			break
-	// 		default:
-	// 			x = f(x, element).(T)
-	// 			break
-	// 		}
-	// 		count++
-	// 	}
-	// }
-
-	// if count < 2 {
-	// 	var zero T
-	// 	return zero, false
-	// }
-
+	var wg sync.WaitGroup
+	n := stream.partition()
+	results := make(chan T, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go reduce(&wg, results, stream, f, i)
+	}
+	wg.Wait()
+	close(results)
+	var x, y T
+	count := 0
+	for result := range results {
+		if count == 0 {
+			x = result
+		} else {
+			y = result
+			x = f(x, y)
+		}
+		count++
+	}
+	if count == 0 {
+		var zero T
+		return zero, false
+	}
 	return x, true
 }
 
