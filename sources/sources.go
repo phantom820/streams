@@ -45,17 +45,24 @@ type partitionedSource[T any] struct {
 // to collect it into a slice.
 func (partitionedSource *partitionedSource[T]) Partition(n int) int {
 	data := collectSource(partitionedSource.source)
+	if len(data) == 0 {
+		partitionedSource.sources = make([]Source[T], 0)
+		return 0
+	}
 	partitionSize := int(math.Ceil(float64(len(data)) / float64(n))) // Do we need smarter ways of picking the partition size here.
-	sources := make([]Source[T], 0)
+	numberOfPartitons := int(math.Ceil(float64(len(data)) / float64(partitionSize)))
+	sources := make([]Source[T], numberOfPartitons)
+	j := 0
 	for i := 0; i < len(data); i = i + partitionSize {
 		var partition []T
-		if i+partitionSize >= len(data) {
+		if i+partitionSize >= (len(data)) {
 			partition = data[i:]
 		} else {
 			partition = data[i : i+partitionSize]
 		}
 		source := NewSourceFromSlice(func() []T { return partition })
-		sources = append(sources, source)
+		sources[j] = source
+		j++
 	}
 	partitionedSource.sources = sources
 	return len(sources)
