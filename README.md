@@ -40,7 +40,7 @@ type Stream[T any] interface {
 }
 ```
 
-#### Sequential vs Concurrent
+#### Sequential vs Concurrent streams
 | Sequential      | Concurrent |
 | ----------- | ----------- |
 | Processes its elements sequentially (max concurreny = 1) .    | Processes its elements concurrently using no more than a specified number of go routines (max concurrency > 1).     |
