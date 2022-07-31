@@ -44,9 +44,10 @@ type Stream[T any] interface {
 | Sequential      | Concurrent |
 | ----------- | ----------- |
 | Processes its elements sequentially (max concurreny = 1) .    | Processes its elements concurrently using no more than a specified number of go routines (max concurrency > 1).     |
-| Preserves encounter order fro the source  | Does not preserve encounter order from the source.      |
+| Preserves encounter order from the source  | Does not preserve encounter order from the source.      |
 | Infinite source will work if limit operation is applied. | Infinite source will not work in any case |
-| Reduce operation does not require function to be commutative. | Reduce results may not make sense if given function is not commutative.
+| Reduce operation does not require function to be commutative. | Reduce results may not make sense if given function is not commutative.|
+| Limit, Skip & Distinct operations are cheap | Limit,Skip & Distinct operations are expensive due to locks | 
   
 ```go
 slice := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20}
