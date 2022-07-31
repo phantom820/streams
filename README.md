@@ -47,6 +47,7 @@ type Stream[T any] interface {
 | Preserves encounter order from the source  | Does not preserve encounter order from the source.      |
 | Infinite source will work if limit operation is applied. | Infinite source will not work in any case |
 | Reduce operation does not require function to be commutative. | Reduce results may not make sense if given function is not commutative.|
+| Performs well when cost of processing an element low | Performs well when cost of processing a single element is high.|
 | Limit, Skip & Distinct operations are cheap | Limit,Skip & Distinct operations are expensive due to locks | 
   
 ```go
