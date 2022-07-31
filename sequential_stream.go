@@ -1,4 +1,3 @@
-// package streams provides java motivated stream implementation.
 package streams
 
 import (

@@ -1,4 +1,3 @@
-// package streams provides java motivated stream implementation.
 package streams
 
 import (
@@ -16,7 +15,6 @@ import (
 // to avoid an infinite loop when trying to split stream elements for concurrent processing.
 type concurrentStream[T any] struct {
 	maxcConcurrency int                   // maximum number of go routines to use when processing the stream
-	distinct        bool                  // indicates if the stream consist of distinct elements only , i.e say we constructed this from a set.
 	terminated      bool                  // indicates whether a terminal operation was invoked on the stream.
 	closed          bool                  // indicates whether the stream has been closed , all streams are auto closed once a terminal operation is invoked.
 	completed       func(i int) bool      // checks if the stream has completed processing all elements.
@@ -124,7 +122,6 @@ func (inputStream *concurrentStream[T]) Map(f func(x T) interface{}) Stream[inte
 			}
 			return f(element), ok
 		},
-		distinct:  false,
 		completed: inputStream.completed,
 		partition: inputStream.partition,
 	}
@@ -149,7 +146,6 @@ func (inputStream *concurrentStream[T]) Filter(f func(x T) bool) Stream[T] {
 			}
 			return element, true
 		},
-		distinct:  inputStream.distinct,
 		completed: inputStream.completed,
 		partition: inputStream.partition,
 	}
@@ -187,7 +183,6 @@ func (inputStream *concurrentStream[T]) Limit(limit int) Stream[T] {
 			}
 			return false
 		},
-		distinct:  inputStream.distinct,
 		partition: inputStream.partition,
 	}
 	return &newStream
@@ -218,7 +213,6 @@ func (inputStream *concurrentStream[T]) Skip(skip int) Stream[T] {
 				return element, true
 			}
 		},
-		distinct:  inputStream.distinct,
 		completed: inputStream.completed,
 		partition: inputStream.partition,
 	}
@@ -247,7 +241,6 @@ func (inputStream *concurrentStream[T]) Distinct(equals func(x, y T) bool, hashC
 			set.Add(element[T]{value: item, equals: equals, hashCode: hashCode})
 			return item, true
 		},
-		distinct:  true,
 		completed: inputStream.completed,
 		partition: inputStream.partition,
 	}

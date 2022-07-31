@@ -59,7 +59,7 @@ func ErrIllegalArgument(argument, operation string) Error {
 	return Error{code: IllegalArgument, msg: buffer.String()}
 }
 
-// ErrIllegalConfigu returns an error for trying to construct a stream with illegal concurrency.
+// ErrIllegalConfig returns an error for trying to construct a stream with an illegal config.
 func ErrIllegalConfig(config, function string) Error {
 	var buffer bytes.Buffer
 	IllegalConfigTemplate.Execute(&buffer, map[string]string{"config": config, "function": function})

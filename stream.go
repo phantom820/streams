@@ -1,7 +1,10 @@
+// package streams provides java motivated stream API for go. It provides both sequential streams and concurrent streams. The type of stream
+// is specified by a max concurrency parameter that is available in the various stream constructors. The underlying source for a stream can be finit/infinite
+// in the case of an infinite source a sequential stream will process the source correctly if a limit operation is applied before invoking a terminal operation,
+// while for a concurrent stream (max concurrency > 1) an infinite source will lead to an infinite loop even if we apply a limit operation.
 package streams
 
 import (
-	_ "embed"
 	"fmt"
 
 	"github.com/phantom820/collections"
