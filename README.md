@@ -22,6 +22,9 @@ type Stream[T any] interface {
 	Limit(n int) Stream[T]                                           // Returns a stream consisting of the elements of the stream but only limited to processing n elements.
 	Skip(n int) Stream[T]                                            // Returns a stream that skips the first n elements it encounters in processing.
 	Distinct(equals func(x, y T) bool, hash func(x T) int) Stream[T] // Returns a stream consisting of distinct elements. Elements are distinguished using equality and hash code.
+	Peek(f func(x T)) Stream[T]                                      // Returns a stream consisting of the elements of the given stream but additionaly the given function is invoked for each element.
+
+	
 
 	// Terminal operations.
 	ForEach(f func(x T))               // Performs an action specified by the function f for each element of this stream.
