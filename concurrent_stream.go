@@ -254,6 +254,28 @@ func (inputStream *concurrentStream[T]) Distinct(equals func(x, y T) bool, hashC
 	return &newStream
 }
 
+// Peek Returns a stream consisting of the elements of the given stream but additionaly the given function is invoked for each element.
+func (inputStream *concurrentStream[T]) Peek(f func(x T)) Stream[T] {
+	if ok, err := inputStream.valid(); !ok {
+		panic(err)
+	}
+	defer inputStream.close()
+	newStream := concurrentStream[T]{
+		pipeline: func(i int) (T, bool) {
+			element, ok := inputStream.pipeline(i)
+			if !ok {
+				return element, ok
+			}
+			f(element)
+			return element, ok
+		},
+		completed:  inputStream.completed,
+		terminated: false,
+		partition:  inputStream.partition,
+	}
+	return &newStream
+}
+
 // collect collects the result from a particular partition into a slice.
 func collect[T any](wg *sync.WaitGroup, result chan []T, stream *concurrentStream[T], i int) {
 	defer wg.Done()

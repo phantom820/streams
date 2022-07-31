@@ -248,6 +248,27 @@ func (inputStream *stream[T]) Distinct(equals func(x, y T) bool, hashCode func(x
 	return &newStream
 }
 
+// Peek Returns a stream consisting of the elements of the given stream but additionaly the given function is invoked for each element.
+func (inputStream *stream[T]) Peek(f func(x T)) Stream[T] {
+	if ok, err := inputStream.valid(); !ok {
+		panic(err)
+	}
+	defer inputStream.close()
+	newStream := stream[T]{
+		pipeline: func() (T, bool) {
+			element, ok := inputStream.pipeline()
+			if !ok {
+				return element, ok
+			}
+			f(element)
+			return element, ok
+		},
+		completed:  inputStream.completed,
+		terminated: false,
+	}
+	return &newStream
+}
+
 // ForEach performs the given task on each element of the stream.
 func (stream *stream[T]) ForEach(f func(element T)) {
 	if ok, err := stream.valid(); !ok {

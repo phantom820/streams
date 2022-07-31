@@ -287,6 +287,30 @@ func TestDistinct(t *testing.T) {
 
 }
 
+func TestPeek(t *testing.T) {
+
+	stream := fromSource[int](&finiteSourceMock{maxSize: 10})
+	slice := make([]int, 0)
+	otherStream := stream.Peek(func(x int) {
+		slice = append(slice, x)
+	})
+
+	// Case 1 : Test peeking at elements;
+	otherSlice := otherStream.Collect()
+	assert.Equal(t, slice, otherSlice)
+
+	// Case 2: Test peeking for a terminated stream.
+	t.Run("Peek on  a terminated stream", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				assert.Equal(t, StreamTerminated, r.(*Error).Code())
+			}
+		}()
+		otherStream.Peek(func(x int) {})
+	})
+
+}
+
 func TestForEach(t *testing.T) {
 
 	source := finiteSourceMock{maxSize: 6}

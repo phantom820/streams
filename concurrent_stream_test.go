@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/phantom820/collections/lists/list"
@@ -222,6 +223,33 @@ func TestConcurrentLimit(t *testing.T) {
 			}
 		}()
 		stream.Limit(-2)
+	})
+
+}
+
+func TestConcurrentPeek(t *testing.T) {
+
+	stream := concurrentFromSource[int](&finiteSourceMock{maxSize: 10}, 2)
+	slice := make([]int, 0)
+	mu := sync.Mutex{}
+	otherStream := stream.Peek(func(x int) {
+		mu.Lock()
+		defer mu.Unlock()
+		slice = append(slice, x)
+	})
+
+	// Case 1 : Test peeking at elements;
+	otherSlice := otherStream.Collect()
+	assert.ElementsMatch(t, slice, otherSlice)
+
+	// Case 2: Test peeking for a terminated stream.
+	t.Run("Peek on  a terminated stream", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				assert.Equal(t, StreamTerminated, r.(*Error).Code())
+			}
+		}()
+		otherStream.Peek(func(x int) {})
 	})
 
 }
