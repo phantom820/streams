@@ -95,7 +95,15 @@ Distinct(func(x, y int) bool { return x == y }, func(x int) int { return x }).
 // [1 0 2 3 4 5]
 ```
 
-#### Complex maniplulations
+#### Complex manipulations
+Transform to ascii value and sum.
+```go
+slice := []rune{'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'}
+	stream := streams.NewFromSlice(func() []rune { return slice }, 1)
+	val, _ := streams.Map(stream, func(x rune) int { return int(x) }).
+		Reduce(func(x, y int) int { return x + y })
+```
+
 Sum of the even numbers in the range [1,10].
 ```go
 slice := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
