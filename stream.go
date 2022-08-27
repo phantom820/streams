@@ -118,7 +118,7 @@ func mapConcurrentStream[T any, U any](inputStream *concurrentStream[T], f func(
 	return &newStream
 }
 
-// Map maps the given stream of type T to a new stream of type U. This is to be used
+// Map maps the given stream of type T to a new stream of type U. This is to be used when the transformation function f produces a different type .
 func Map[T any, U any](inputStream Stream[T], f func(e T) U) Stream[U] {
 	switch v := inputStream.(type) {
 	case *stream[T]:
