@@ -100,18 +100,17 @@ func fromSlice[T any](f func() []T) Stream[T] {
 	return &stream
 }
 
-// Map returns a stream containing the results of applying the given mapping function to the elements of the stream. Applying this operation results in
-// the underlying type of the stream being an interface since receiver methods do not support generic types.
-func (inputStream *stream[T]) Map(f func(x T) interface{}) Stream[interface{}] {
+// Map returns a stream containing the results of applying the given transformation function to the elements of the stream.
+func (inputStream *stream[T]) Map(f func(x T) T) Stream[T] {
 	if ok, err := inputStream.valid(); !ok {
 		panic(err)
 	}
 	defer inputStream.close()
-	newStream := stream[interface{}]{
-		pipeline: func() (interface{}, bool) {
+	newStream := stream[T]{
+		pipeline: func() (T, bool) {
 			element, ok := inputStream.getPipeline()()
 			if !ok {
-				var sentinel interface{}
+				var sentinel T
 				return sentinel, ok
 			}
 			return f(element), ok

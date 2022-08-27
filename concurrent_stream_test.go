@@ -3,7 +3,6 @@
 package streams
 
 import (
-	"fmt"
 	"math/rand"
 	"strings"
 	"sync"
@@ -150,14 +149,14 @@ func TestConcurrentFilter(t *testing.T) {
 func TestConcurrentMap(t *testing.T) {
 
 	stream := concurrentFromSource[int](&finiteSourceMock{maxSize: 10}, 2)
-	mappedStream := stream.Map(func(x int) interface{} {
-		return fmt.Sprint(x)
+	mappedStream := stream.Map(func(x int) int {
+		return x + 1
 	})
 
 	// Case : Map elements.
 	assert.Equal(t, false, stream.Terminated())
 	assert.Equal(t, false, mappedStream.Terminated())
-	assert.ElementsMatch(t, []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}, mappedStream.Collect())
+	assert.ElementsMatch(t, []int{2, 3, 4, 5, 6, 7, 8, 9, 10, 11}, mappedStream.Collect())
 	assert.Equal(t, true, stream.Closed())
 	assert.Equal(t, true, mappedStream.Terminated())
 
@@ -168,7 +167,7 @@ func TestConcurrentMap(t *testing.T) {
 				assert.Equal(t, StreamTerminated, r.(*Error).Code())
 			}
 		}()
-		mappedStream.Map(func(x interface{}) interface{} { return x })
+		mappedStream.Map(func(x int) int { return x })
 	})
 
 	// Case 3 : Mapping on a closed stream.
@@ -178,7 +177,7 @@ func TestConcurrentMap(t *testing.T) {
 				assert.Equal(t, StreamClosed, r.(*Error).Code())
 			}
 		}()
-		stream.Map(func(x int) interface{} { return "" })
+		stream.Map(func(x int) int { return x })
 	})
 
 }
@@ -368,7 +367,7 @@ func TestConcurrentIntegration(t *testing.T) {
 	vowels := concurrentFromSlice(func() []string { return []string{"A", "B", "C", "D", "E", "F", "G", "H", "I"} }, 1).
 		Filter(func(x string) bool {
 			return strings.ContainsAny(x, "AEIOU")
-		}).Map(func(x string) interface{} {
+		}).Map(func(x string) string {
 		return strings.ToLower(x)
 	}).Collect()
 	assert.ElementsMatch(t, []string{"a", "e", "i"}, vowels)
@@ -377,7 +376,7 @@ func TestConcurrentIntegration(t *testing.T) {
 	vowels = concurrentFromSlice(func() []string { return []string{"A", "B", "C", "D", "E", "F", "G", "H", "I"} }, 1).
 		Filter(func(x string) bool {
 			return strings.ContainsAny(x, "AEIOU")
-		}).Map(func(x string) interface{} {
+		}).Map(func(x string) string {
 		return strings.ToLower(x)
 	}).Limit(2).Collect()
 	assert.ElementsMatch(t, []string{"a", "e"}, vowels)

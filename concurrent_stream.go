@@ -106,18 +106,17 @@ func concurrentFromSource[T any](source sources.Source[T], maxConcurrency int) S
 	return stream
 }
 
-// Map returns a stream containing the results of applying the given mapping function to the elements of the stream. Applying this operation results in
-// the underlying type of the stream being an interface since receiver methods do not support generic types.
-func (inputStream *concurrentStream[T]) Map(f func(x T) interface{}) Stream[interface{}] {
+// Map returns a stream containing the results of applying the given mapping function to the elements of the stream.
+func (inputStream *concurrentStream[T]) Map(f func(x T) T) Stream[T] {
 	if ok, err := inputStream.valid(); !ok {
 		panic(err)
 	}
 	defer inputStream.close()
-	newStream := concurrentStream[interface{}]{
-		pipeline: func(i int) (interface{}, bool) {
+	newStream := concurrentStream[T]{
+		pipeline: func(i int) (T, bool) {
 			element, ok := inputStream.pipeline(i)
 			if !ok {
-				var sentinel interface{}
+				var sentinel T
 				return sentinel, ok
 			}
 			return f(element), ok

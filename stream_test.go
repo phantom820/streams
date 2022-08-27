@@ -1,6 +1,7 @@
 package streams
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/phantom820/collections/lists/list"
@@ -75,5 +76,69 @@ func TestNewFromSlice(t *testing.T) {
 			}
 		}()
 		NewFromSlice(func() []int { return slice }, 0)
+	})
+}
+
+func TestTopLevelMap(t *testing.T) {
+
+	stream := fromSource[int](&finiteSourceMock{maxSize: 10})
+	mappedStream := Map(stream, func(e int) string { return fmt.Sprint(e) })
+	assert.Equal(t, false, stream.Terminated())
+	assert.Equal(t, false, mappedStream.Terminated())
+	assert.ElementsMatch(t, []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}, mappedStream.Collect())
+	assert.Equal(t, true, stream.Closed())
+	assert.Equal(t, true, mappedStream.Closed())
+	assert.Equal(t, true, mappedStream.Terminated())
+
+	// Case 2 : Mapping a terminated stream.
+	t.Run("Mapping a terminated stream.", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				assert.Equal(t, StreamTerminated, r.(*Error).Code())
+			}
+		}()
+		mappedStream.Map(func(x string) string { return x })
+	})
+
+	// Case 3 : Mapping on a closed stream.
+	t.Run("Mapping a closed stream.", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				assert.Equal(t, StreamClosed, r.(*Error).Code())
+			}
+		}()
+		stream.Map(func(x int) int { return x })
+	})
+}
+
+func TestTopLevelConcurrentMap(t *testing.T) {
+
+	stream := concurrentFromSource[int](&finiteSourceMock{maxSize: 10}, 2)
+	mappedStream := Map(stream, func(e int) string { return fmt.Sprint(e) })
+	assert.Equal(t, false, stream.Terminated())
+	assert.Equal(t, false, mappedStream.Terminated())
+	assert.ElementsMatch(t, []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}, mappedStream.Collect())
+	assert.Equal(t, true, stream.Closed())
+	assert.Equal(t, true, mappedStream.Closed())
+	assert.Equal(t, true, mappedStream.Terminated())
+
+	// Case 2 : Mapping a terminated stream.
+	t.Run("Mapping a terminated stream.", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				assert.Equal(t, StreamTerminated, r.(*Error).Code())
+			}
+		}()
+		mappedStream.Map(func(x string) string { return x })
+	})
+
+	// Case 3 : Mapping on a closed stream.
+	t.Run("Mapping a closed stream.", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				assert.Equal(t, StreamClosed, r.(*Error).Code())
+			}
+		}()
+		stream.Map(func(x int) int { return x })
 	})
 }

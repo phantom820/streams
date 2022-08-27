@@ -143,14 +143,14 @@ func TestFilter(t *testing.T) {
 func TestMap(t *testing.T) {
 
 	stream := fromSource[int](&finiteSourceMock{maxSize: 10})
-	mappedStream := stream.Map(func(x int) interface{} {
-		return fmt.Sprint(x)
+	mappedStream := stream.Map(func(x int) int {
+		return x + 1
 	})
 
 	// Case : Map elements.
 	assert.Equal(t, false, stream.Terminated())
 	assert.Equal(t, false, mappedStream.Terminated())
-	assert.ElementsMatch(t, []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}, mappedStream.Collect())
+	assert.ElementsMatch(t, []int{2, 3, 4, 5, 6, 7, 8, 9, 10, 11}, mappedStream.Collect())
 	assert.Equal(t, true, stream.Closed())
 	assert.Equal(t, true, mappedStream.Closed())
 	assert.Equal(t, true, mappedStream.Terminated())
@@ -162,7 +162,7 @@ func TestMap(t *testing.T) {
 				assert.Equal(t, StreamTerminated, r.(*Error).Code())
 			}
 		}()
-		mappedStream.Map(func(x interface{}) interface{} { return x })
+		mappedStream.Map(func(x int) int { return x })
 	})
 
 	// Case 3 : Mapping on a closed stream.
@@ -172,7 +172,7 @@ func TestMap(t *testing.T) {
 				assert.Equal(t, StreamClosed, r.(*Error).Code())
 			}
 		}()
-		stream.Map(func(x int) interface{} { return "" })
+		stream.Map(func(x int) int { return x })
 	})
 }
 
@@ -430,26 +430,26 @@ func TestIntegration(t *testing.T) {
 
 	sum, ok := stream.Filter(func(x int) bool {
 		return x%2 == 0
-	}).Map(func(x int) interface{} {
+	}).Map(func(x int) int {
 		return x * x
-	}).Limit(10).Reduce(func(x, y interface{}) interface{} {
-		return x.(int) + y.(int)
+	}).Limit(10).Reduce(func(x, y int) int {
+		return x + y
 	})
 
 	assert.Equal(t, true, ok)
-	assert.Equal(t, 1540, sum.(int))
+	assert.Equal(t, 1540, sum)
 
 	// Case 2 : Infinite stream -> skip first 10 elements , keep only multiples of 3 limited to the first n.
-	str, ok := fromSource[int](&infiniteSourceMock{}).Skip(10).Filter(func(x int) bool {
+	res, ok := fromSource[int](&infiniteSourceMock{}).Skip(10).Filter(func(x int) bool {
 		return x%3 == 0
-	}).Map(func(x int) interface{} {
-		return fmt.Sprint(x)
-	}).Limit(4).Reduce(func(x, y interface{}) interface{} {
-		return x.(string) + ", " + y.(string)
+	}).Map(func(x int) int {
+		return x
+	}).Limit(4).Reduce(func(x, y int) int {
+		return x + y
 	})
 
 	assert.Equal(t, true, ok)
-	assert.Equal(t, "12, 15, 18, 21", str.(string))
+	assert.Equal(t, 66, res)
 
 	// Case 3 : Finite stream -> distinct and count.
 	fruitStream := fromCollection[types.String](

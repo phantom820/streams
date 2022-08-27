@@ -17,7 +17,7 @@ type Stream[T any] interface {
 
 	// Intermediate operations.
 	Filter(f func(x T) bool) Stream[T]                               // Returns a stream consisting of the elements of this stream that satisfy the given predicate.
-	Map(f func(x T) interface{}) Stream[interface{}]                 // Returns a stream consisting of the results of applying the given function to the elements of the stream.
+	Map(f func(x T) T) Stream[T]                                     // Returns a stream consisting of the results of applying the given transformation to the elements of the stream.
 	Limit(n int) Stream[T]                                           // Returns a stream consisting of the elements of the stream but only limited to processing n elements.
 	Skip(n int) Stream[T]                                            // Returns a stream that skips the first n elements it encounters in processing.
 	Distinct(equals func(x, y T) bool, hash func(x T) int) Stream[T] // Returns a stream consisting of distinct elements. Elements are distinguished using equality and hash code.
@@ -74,4 +74,58 @@ func NewFromSource[T any](source sources.Source[T], maxConcurrency int) Stream[T
 		return fromSource(source)
 	}
 	return concurrentFromSource(source, maxConcurrency)
+}
+
+// mapSequentialStream for internal use with tope level map function.
+func mapSequentialStream[T any, U any](inputStream *stream[T], f func(e T) U) Stream[U] {
+	if ok, err := inputStream.valid(); !ok {
+		panic(err)
+	}
+	defer inputStream.close()
+	newStream := stream[U]{
+		pipeline: func() (U, bool) {
+			element, ok := inputStream.pipeline()
+			if !ok {
+				var sentinel U
+				return sentinel, ok
+			}
+			return f(element), ok
+		},
+		completed:  inputStream.completed,
+		terminated: false,
+	}
+	return &newStream
+}
+
+// mapConcurrentStream for internal use with tope level map function.
+func mapConcurrentStream[T any, U any](inputStream *concurrentStream[T], f func(e T) U) Stream[U] {
+	if ok, err := inputStream.valid(); !ok {
+		panic(err)
+	}
+	defer inputStream.close()
+	newStream := concurrentStream[U]{
+		pipeline: func(i int) (U, bool) {
+			element, ok := inputStream.pipeline(i)
+			if !ok {
+				var sentinel U
+				return sentinel, ok
+			}
+			return f(element), ok
+		},
+		completed: inputStream.completed,
+		partition: inputStream.partition,
+	}
+	return &newStream
+}
+
+// Map maps the given stream of type T to a new stream of type U. This is to be used
+func Map[T any, U any](inputStream Stream[T], f func(e T) U) Stream[U] {
+	switch v := inputStream.(type) {
+	case *stream[T]:
+		return mapSequentialStream(v, f)
+	case *concurrentStream[T]:
+		return mapConcurrentStream(v, f)
+	default:
+		panic(22)
+	}
 }
