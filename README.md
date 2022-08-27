@@ -105,12 +105,13 @@ sum, ok := streams.NewFromSlice(func() []int { return slice }, 1).
 ```
 Reduce to lower case and filter out consonants.
 ```go
+
 slice := []string{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J"}
 
 newSlice := streams.NewFromSlice(func() []string { return slice }, 1).
-  Map(func(x string) interface{} { return strings.ToLower(x) }).
-  Filter(func(x interface{}) bool { return strings.ContainsAny(x.(string), "aeiou") }).
-  Collect()
+	Map(func(x string) string { return strings.ToLower(x) }).
+	Filter(func(x string) bool { return strings.ContainsAny(x, "aeiou") }).
+	Collect()
 
 // [a e i]
 ```
