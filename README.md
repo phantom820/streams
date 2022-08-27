@@ -99,9 +99,9 @@ Distinct(func(x, y int) bool { return x == y }, func(x int) int { return x }).
 Transform to ascii value and sum.
 ```go
 slice := []rune{'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'}
-	stream := streams.NewFromSlice(func() []rune { return slice }, 1)
-	val, _ := streams.Map(stream, func(x rune) int { return int(x) }).
-		Reduce(func(x, y int) int { return x + y })
+stream := streams.NewFromSlice(func() []rune { return slice }, 1)
+val, _ := streams.Map(stream, func(x rune) int { return int(x) }).
+	Reduce(func(x, y int) int { return x + y })
 ```
 
 Sum of the even numbers in the range [1,10].
