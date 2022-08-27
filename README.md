@@ -18,7 +18,7 @@ type Stream[T any] interface {
 
 	// Intermediate operations.
 	Filter(f func(x T) bool) Stream[T]                               // Returns a stream consisting of the elements of this stream that satisfy the given predicate.
-	Map(f func(x T) interface{}) Stream[interface{}]                 // Returns a stream consisting of the results of applying the given function to the elements of the stream.
+	Map(f func(x T) T) Stream[T]                                     // Returns a stream consisting of the results of applying the given transformation to the elements of the stream.
 	Limit(n int) Stream[T]                                           // Returns a stream consisting of the elements of the stream but only limited to processing n elements.
 	Skip(n int) Stream[T]                                            // Returns a stream that skips the first n elements it encounters in processing.
 	Distinct(equals func(x, y T) bool, hash func(x T) int) Stream[T] // Returns a stream consisting of distinct elements. Elements are distinguished using equality and hash code.
@@ -38,6 +38,11 @@ type Stream[T any] interface {
 	// operations, terminated streams are also closed.
 	Concurrent() bool // Checks if the stream has a max concurrency > 1 or not.
 }
+```
+#### Note 
+There is a top level Map function to allow maping from one type to another for a stream. 
+```go
+func Map[T any, U any](inputStream Stream[T], f func(e T) U) Stream[U] 
 ```
 
 #### Sequential vs Concurrent streams
