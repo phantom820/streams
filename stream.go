@@ -126,6 +126,6 @@ func Map[T any, U any](inputStream Stream[T], f func(e T) U) Stream[U] {
 	case *concurrentStream[T]:
 		return mapConcurrentStream(v, f)
 	default:
-		panic(22)
+		panic(ErrIllegalStreamMapping(fmt.Sprint(v)))
 	}
 }

@@ -11,6 +11,12 @@ import (
 	"github.com/phantom820/streams/sources"
 )
 
+type streamMetadata struct {
+	limit int
+	skip  int
+	count int
+}
+
 // concurrentSTream represent a stream implementation in which elements can be operated on concurrently. The underlying source has to be finite in order
 // to avoid an infinite loop when trying to split stream elements for concurrent processing.
 type concurrentStream[T any] struct {
@@ -151,6 +157,26 @@ func (inputStream *concurrentStream[T]) Filter(f func(x T) bool) Stream[T] {
 	return &newStream
 }
 
+// atomicCounter for concurrent counting.
+type atomicCounter struct {
+	number uint64
+}
+
+// newAtomicCounter creates a new couter.
+func newAtomicCounter() *atomicCounter {
+	return &atomicCounter{0}
+}
+
+// add increments counter by specified value.
+func (c *atomicCounter) add(num uint64) {
+	atomic.AddUint64(&c.number, num)
+}
+
+// read returns value of the counter.
+func (c *atomicCounter) read() uint64 {
+	return atomic.LoadUint64(&c.number)
+}
+
 // Returns a stream that is limited to only producing n elements. Will panic if limit is negative.
 func (inputStream *concurrentStream[T]) Limit(limit int) Stream[T] {
 	if ok, err := inputStream.valid(); !ok {
@@ -159,25 +185,25 @@ func (inputStream *concurrentStream[T]) Limit(limit int) Stream[T] {
 		panic(ErrIllegalArgument("Limit", fmt.Sprint(limit)))
 	}
 	defer inputStream.close()
-	var counter uint32
 	var mutex sync.Mutex
+	counter := newAtomicCounter()
 	newStream := concurrentStream[T]{
 		pipeline: func(i int) (T, bool) {
-			mutex.Lock()
-			defer mutex.Unlock()
-			element, ok := inputStream.getPipeline()(i)
+			element, ok := inputStream.pipeline(i)
 			if !ok {
 				return element, ok
 			} else {
-				if int(atomic.LoadUint32(&counter)) < limit {
-					atomic.AddUint32(&counter, 1)
+				mutex.Lock()
+				defer mutex.Unlock()
+				if int(counter.read()) < limit {
+					counter.add(1)
 					return element, true
 				}
 				return element, false
 			}
 		},
 		completed: func(i int) bool {
-			if inputStream.completed(i) || int(atomic.LoadUint32(&counter)) >= limit {
+			if inputStream.completed(i) || int(counter.read()) >= limit {
 				return true
 			}
 			return false
@@ -195,18 +221,19 @@ func (inputStream *concurrentStream[T]) Skip(skip int) Stream[T] {
 		panic(ErrIllegalArgument("Skip", fmt.Sprint(skip)))
 	}
 	defer inputStream.close()
-	var counter uint32
 	var mutex sync.Mutex
+	counter := newAtomicCounter()
 	newStream := concurrentStream[T]{
 		pipeline: func(i int) (T, bool) {
-			mutex.Lock()
-			defer mutex.Unlock()
+
 			element, ok := inputStream.pipeline(i)
 			if !ok {
 				return element, ok
 			} else {
-				if int(atomic.LoadUint32(&counter)) < skip {
-					atomic.AddUint32(&counter, 1)
+				mutex.Lock()
+				defer mutex.Unlock()
+				if int(counter.read()) < skip {
+					counter.add(1)
 					return element, false
 				}
 				return element, true
@@ -224,21 +251,23 @@ func (inputStream *concurrentStream[T]) Distinct(equals func(x, y T) bool, hashC
 		panic(err)
 	}
 	defer inputStream.close()
-	set := hashset.New[element[T]]()
 	var mutex sync.Mutex
+	set := hashset.New[element[T]]()
 	newStream := concurrentStream[T]{
 		pipeline: func(i int) (T, bool) {
-			mutex.Lock()
-			defer mutex.Unlock()
 			item, ok := inputStream.pipeline(i)
 			if !ok {
 				return item, false
-			} else if set.Contains(element[T]{value: item, equals: equals, hashCode: hashCode}) {
-				var sentinel T
-				return sentinel, false
+			} else {
+				mutex.Lock()
+				defer mutex.Unlock()
+				if set.Contains(element[T]{value: item, equals: equals, hashCode: hashCode}) {
+					var sentinel T
+					return sentinel, false
+				}
+				set.Add(element[T]{value: item, equals: equals, hashCode: hashCode})
+				return item, true
 			}
-			set.Add(element[T]{value: item, equals: equals, hashCode: hashCode})
-			return item, true
 		},
 		completed: inputStream.completed,
 		partition: inputStream.partition,

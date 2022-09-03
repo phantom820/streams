@@ -7,18 +7,20 @@ import (
 
 // error codes.
 const (
-	StreamTerminated = 1
-	IllegalArgument  = 2
-	StreamClosed     = 3
-	IllegalConfig    = 4
+	StreamTerminated     = 1
+	IllegalArgument      = 2
+	StreamClosed         = 3
+	IllegalConfig        = 4
+	IllegalStreamMapping = 5
 )
 
 // error templates.
 var (
-	StreamTerminatedTemplate, _ = template.New("StreamTerminated").Parse("ErrStreamTerminated: A terminal operation has been invoked on the stream.")
-	IllegalArgumentTemplate, _  = template.New("IllegalArgument").Parse("ErrIllegalArgument: Illegal argument: {{.argument}} for operation: {{.operation}}.")
-	StreamClosedTemplate, _     = template.New("StreamClosed").Parse("ErrStreamClosed: The stream has been closed.")
-	IllegalConfigTemplate, _    = template.New("IllegalConfig").Parse("ErrIllegalStreamConfig: Illegal configuration {{.argument}} when trying to create a stream using {{.function}}")
+	StreamTerminatedTemplate, _     = template.New("StreamTerminated").Parse("ErrStreamTerminated: A terminal operation has been invoked on the stream.")
+	IllegalArgumentTemplate, _      = template.New("IllegalArgument").Parse("ErrIllegalArgument: Illegal argument: {{.argument}} for operation: {{.operation}}.")
+	StreamClosedTemplate, _         = template.New("StreamClosed").Parse("ErrStreamClosed: The stream has been closed.")
+	IllegalConfigTemplate, _        = template.New("IllegalConfig").Parse("ErrIllegalStreamConfig: Illegal configuration {{.argument}} when trying to create a stream using {{.function}}.")
+	IllegalStreamMappingTemplate, _ = template.New("IllegalMapping").Parse("ErrIllegalStreamMapping: The given stream cannot be mapped to {{.type}}.")
 )
 
 // Error a custom error type for stream.
@@ -64,4 +66,11 @@ func ErrIllegalConfig(config, function string) Error {
 	var buffer bytes.Buffer
 	IllegalConfigTemplate.Execute(&buffer, map[string]string{"config": config, "function": function})
 	return Error{code: IllegalConfig, msg: buffer.String()}
+}
+
+// ErrIllegalStreamMapping returns an error when top level map function for  streams cannot identify underlying type as *stream or *concurrentStream.
+func ErrIllegalStreamMapping(toType string) Error {
+	var buffer bytes.Buffer
+	IllegalStreamMappingTemplate.Execute(&buffer, map[string]string{"type": toType})
+	return Error{code: IllegalStreamMapping, msg: buffer.String()}
 }

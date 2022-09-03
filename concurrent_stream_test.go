@@ -189,7 +189,7 @@ func TestConcurrentLimit(t *testing.T) {
 
 	// Case 1 : Limit with a valid number on a finite source. This should not fail.
 	for i := 0; i < runs; i++ {
-		stream = concurrentFromSource[int](&finiteSourceMock{maxSize: 200}, 3)
+		stream = concurrentFromSource[int](&finiteSourceMock{maxSize: 200}, 4)
 		limit := 4 + rand.Intn((100))
 		limitedStream := stream.Limit(limit)
 		assert.Equal(t, true, stream.Closed())

@@ -194,7 +194,21 @@ func TestLimit(t *testing.T) {
 
 	assert.ElementsMatch(t, []int{1, 2}, slice)
 
-	// Case 2 : Limit with a valid number on an infinite source.
+	// Case 2: Limit when limit exceeds number of elements.
+	stream = fromSource[int](&finiteSourceMock{maxSize: 3})
+	limitedStream = stream.Limit(5)
+	assert.Equal(t, false, stream.Terminated())
+	assert.Equal(t, true, stream.Closed())
+	assert.Equal(t, false, limitedStream.Terminated())
+	assert.Equal(t, false, limitedStream.Closed())
+
+	slice = limitedStream.Collect()
+	assert.Equal(t, true, limitedStream.Terminated())
+	assert.Equal(t, true, limitedStream.Closed())
+
+	assert.ElementsMatch(t, []int{1, 2, 3}, slice)
+
+	// Case 3 : Limit with a valid number on an infinite source.
 	stream = fromSource[int](&infiniteSourceMock{})
 	limitedStream = stream.Limit(10)
 
@@ -205,7 +219,7 @@ func TestLimit(t *testing.T) {
 	assert.Equal(t, true, limitedStream.Terminated())
 	assert.ElementsMatch(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, slice)
 
-	// Case 3 : Limiting a terminated stream.
+	// Case 4 : Limiting a terminated stream.
 	t.Run("Limiting a terminated stream.", func(t *testing.T) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -215,7 +229,7 @@ func TestLimit(t *testing.T) {
 		limitedStream.Limit(1)
 	})
 
-	// Case 4 : Limit with an illegal number.
+	// Case 5 : Limit with an illegal number.
 	stream = fromSource[int](&finiteSourceMock{maxSize: 10})
 	t.Run("Limiting with an illegal argument.", func(t *testing.T) {
 		defer func() {
@@ -240,6 +254,16 @@ func TestSkip(t *testing.T) {
 	assert.Equal(t, true, stream.Closed())
 	assert.Equal(t, true, skippedStream.Terminated())
 	assert.ElementsMatch(t, []int{3, 4, 5, 6, 7, 8, 9, 10}, slice)
+
+	// Case 2 : Skip with fewer elements than skip value.
+	stream = fromSource[int](&finiteSourceMock{maxSize: 10})
+	skippedStream = stream.Skip(11)
+	assert.Equal(t, false, stream.Terminated())
+	assert.Equal(t, false, skippedStream.Terminated())
+	slice = skippedStream.Collect()
+	assert.Equal(t, true, stream.Closed())
+	assert.Equal(t, true, skippedStream.Terminated())
+	assert.ElementsMatch(t, []int{}, slice)
 
 	// Case 2 : Skip a terminated stream.
 	t.Run("Skipping a terminated stream", func(t *testing.T) {
