@@ -2,315 +2,242 @@ package streams
 
 import (
 	"fmt"
+	"sync"
 
-	"github.com/phantom820/collections"
 	"github.com/phantom820/collections/sets/hashset"
-	"github.com/phantom820/collections/types"
 	"github.com/phantom820/streams/sources"
 )
 
-// stream a sequential stream implementation. The stream is lazy evaluated and any modification made to its source before a terminal operation is invoked
-// on the stream will be visible to the stream. A stream can be finite/ infinite based on ots source, for a infinite stream a limit operation shoudl always
-// be applied to avoid an infinite loop when trying to process the stream.
-type stream[T any] struct {
-	terminated bool             // indicates whether the stream has been closed.
-	closed     bool             // indicates whether the stream has been closed , all streams are auto closed once a terminal operation is invoked.
-	completed  func() bool      // checks if the stream has completed processing all elements.
-	pipeline   func() (T, bool) // pipeline of the operations.
+// sequentialStream sequential stream implementation.
+type sequentialStream[T any] struct {
+	source     sources.Source[T]       // source of elements for the stream.
+	pipeline   func(input T) (T, bool) // pipeline with operations of the stream.
+	terminated bool                    // terminated indicates if a terminal operation has been invoked on the stream.
+	closed     bool                    //closed indicates if a new stream has been derived from the stream or it has been terminated.
 }
 
-// terminate this terminates the stream and sets some properties to nil.
-func (stream *stream[T]) terminate() {
+// terminate terminates the stream when a terminal operation is invoked on it.
+func (stream *sequentialStream[T]) terminate() {
 	stream.terminated = true
 	stream.closed = true
-	stream.pipeline = nil
-	stream.completed = nil
 }
 
-// Concurrent always returns false for a sequential stream.
-func (stream *stream[T]) Concurrent() bool {
-	return false
-}
-
-// closes the stream, i,e another stream has been derived from it.
-func (stream *stream[T]) close() {
+// close closes the stream when a new stream is derived from it.
+func (stream *sequentialStream[T]) close() {
 	stream.closed = true
 }
 
-// Closed chekcs if the stream is closed which means that another stream was derived from it.
-func (stream *stream[T]) Closed() bool {
-	return stream.closed
-}
-
-// Terminated checks if a terminal operation has been invoked on the stream.
-func (stream *stream[T]) Terminated() bool {
-	return stream.terminated
-}
-
-// valid if a stream is valid for any type of operation.
-func (stream *stream[T]) valid() (bool, *Error) {
+// valid checks if a stream is valid for any type of operation.
+func (stream *sequentialStream[T]) valid() (bool, *streamError) {
 	if stream.Terminated() {
-		err := ErrStreamTerminated()
+		err := errStreamTerminated()
 		return false, &err
 	} else if stream.Closed() {
-		err := ErrStreamClosed()
+		err := errStreamClosed()
 		return false, &err
 	}
 	return true, nil
 }
 
-// getPipeline returns the pipeline of operations of the stream.
-func (stream *stream[T]) getPipeline() func() (T, bool) {
-	return stream.pipeline
+// Terminated returns termination status of the stream.
+func (stream *sequentialStream[T]) Terminated() bool {
+	return stream.terminated
 }
 
-// fromSource creates a stream from the given source. The source can be finite/ infinite.
-func fromSource[T any](source sources.Source[T]) Stream[T] {
-	stream := &stream[T]{
-		pipeline:   emptyPipeline(source),
-		completed:  func() bool { return !(source.HasNext()) },
-		terminated: false,
-	}
-	return stream
+// Closed returns closure status of the stream.
+func (stream *sequentialStream[T]) Closed() bool {
+	return stream.closed
 }
 
-// fromCollection creates a stream from the given collection. All changes made to the collection before the stream is terminated
-// are visible to the stream. Creating from a specific collection is recommended i.e FromSet .
-func fromCollection[T types.Equitable[T]](collection collections.Collection[T]) Stream[T] {
-	it := collection.Iterator()
-	source := sources.NewSource(it.Next, it.HasNext)
-
-	stream := &stream[T]{
-		pipeline:   emptyPipeline(source),
-		completed:  func() bool { return !(source.HasNext()) },
-		terminated: false,
-	}
-	return stream
+// Concurrent returns false always since its a sequential stream..
+func (stream *sequentialStream[T]) Concurrent() bool {
+	return false
 }
 
-// fromSlice creates a stream by using the callback to retrieve the underlying slice. All changes made to the slice before the stream is terminated
-// are visible to the stream.
-func fromSlice[T any](f func() []T) Stream[T] {
-	source := sources.NewSourceFromSlice(f)
-	stream := stream[T]{
-		pipeline:   emptyPipeline(source),
-		completed:  func() bool { return !(source.HasNext()) },
-		terminated: false,
-	}
-	return &stream
-}
-
-// Map returns a stream containing the results of applying the given transformation function to the elements of the stream.
-func (inputStream *stream[T]) Map(f func(x T) T) Stream[T] {
-	if ok, err := inputStream.valid(); !ok {
+// Filter returns a stream consisting of the elements of this stream that match the given predicate function.
+func (stream *sequentialStream[T]) Filter(f func(element T) bool) Stream[T] {
+	if ok, err := stream.valid(); !ok {
 		panic(err)
 	}
-	defer inputStream.close()
-	newStream := stream[T]{
-		pipeline: func() (T, bool) {
-			element, ok := inputStream.getPipeline()()
+	defer stream.close()
+	return &sequentialStream[T]{
+		source: stream.source,
+		pipeline: func(input T) (T, bool) {
+			element, ok := stream.pipeline(input)
 			if !ok {
-				var sentinel T
-				return sentinel, ok
+				return element, ok
 			}
-			return f(element), ok
+			return element, f(element)
 		},
-		completed:  inputStream.completed,
-		terminated: false,
 	}
-	return &newStream
 }
 
-// Filter returns a stream consisting of the elements of the stream that match the given predicate.
-func (inputStream *stream[T]) Filter(f func(x T) bool) Stream[T] {
-	if ok, err := inputStream.valid(); !ok {
-		panic(err)
-	}
-	defer inputStream.close()
-	newStream := stream[T]{
-		pipeline: func() (T, bool) {
-			element, ok := inputStream.pipeline()
-			if !ok {
-				var sentinel T
-				return sentinel, ok
-			} else if !f(element) {
-				var sentinel T
-				return sentinel, false
-			}
-			return element, true
-		},
-		completed:  inputStream.completed,
-		terminated: false,
-	}
-	return &newStream
-}
-
-// Returns a stream that is limited to only producing n elements. Will panic if limit is negative.
-func (inputStream *stream[T]) Limit(limit int) Stream[T] {
-	if ok, err := inputStream.valid(); !ok {
+// Limit returns a stream consisting of the elements of this stream, truncated to be no longer than the given limit.
+func (stream *sequentialStream[T]) Limit(limit int) Stream[T] {
+	if ok, err := stream.valid(); !ok {
 		panic(err)
 	} else if limit < 0 {
-		panic(ErrIllegalArgument("Limit", fmt.Sprint(limit)))
+		panic(errIllegalArgument("Limit", fmt.Sprint(limit)))
 	}
-	defer inputStream.close()
-	n := 0
-	newStream := stream[T]{
-		pipeline: func() (T, bool) {
-			element, ok := inputStream.getPipeline()()
+	defer stream.close()
+	counter := 0
+	return &sequentialStream[T]{
+		source: stream.source,
+		pipeline: func(input T) (T, bool) {
+			element, ok := stream.pipeline(input)
 			if !ok {
 				return element, ok
 			} else {
-				if n < limit {
-					n++
-					return element, true
+				if counter < limit {
+					counter++
+					return element, ok
 				}
 				return element, false
 			}
 		},
-		completed: func() bool {
-			if inputStream.completed() || n >= limit {
-				return true
-			}
-			return false
-		},
-		terminated: false,
 	}
-	return &newStream
 }
 
-// Returns a stream that skips the first n elements in processing. Will panic if number of elements to skip is negative.
-func (inputStream *stream[T]) Skip(skip int) Stream[T] {
-	if ok, err := inputStream.valid(); !ok {
+// Skip returns a stream consisting of the remaining elements of this stream after skipping the first n elements of the stream.
+// If this stream contains fewer than n elements then an empty stream will be returned.
+func (stream *sequentialStream[T]) Skip(n int) Stream[T] {
+	if ok, err := stream.valid(); !ok {
 		panic(err)
+	} else if n < 0 {
+		panic(errIllegalArgument("Skip", fmt.Sprint(n)))
 	}
-	defer inputStream.close()
-	skipped := 0
-	newStream := stream[T]{
-		pipeline: func() (T, bool) {
-			element, ok := inputStream.pipeline()
+	defer stream.close()
+	skipped := atomicCounter{}
+	var mutex sync.Mutex
+	return &sequentialStream[T]{
+		source: stream.source,
+		pipeline: func(input T) (T, bool) {
+			element, ok := stream.pipeline(input)
 			if !ok {
 				return element, ok
 			} else {
-				if skipped < skip {
-					skipped++
+				mutex.Lock()
+				defer mutex.Unlock()
+				if skipped.read() < n {
+					skipped.add(1)
 					return element, false
 				}
 				return element, true
 			}
 		},
-		completed:  inputStream.completed,
-		terminated: false,
 	}
-	return &newStream
 }
 
-// element this type allows us to use sets for the Distinct operation.
-type element[T any] struct {
-	value    T
-	equals   func(a, b T) bool
-	hashCode func(a T) int
-}
-
-// Equals required by Hashable for using a set.
-func (a element[T]) Equals(b element[T]) bool {
-	return a.equals(a.value, b.value)
-}
-
-// HashCode produces the hash code of the element.
-func (a element[T]) HashCode() int {
-	return a.hashCode(a.value)
-}
-
-// Distinct returns a stream consisting of distinct elements. Elements are distinguished using equality and hash code.
-func (inputStream *stream[T]) Distinct(equals func(x, y T) bool, hashCode func(x T) int) Stream[T] {
-	if ok, err := inputStream.valid(); !ok {
+// Peek returns a stream consisting of the elements of this stream, additionally performing the provided action on each element as elements are processed.
+func (stream *sequentialStream[T]) Peek(f func(element T)) Stream[T] {
+	if ok, err := stream.valid(); !ok {
 		panic(err)
 	}
-	defer inputStream.close()
-	set := hashset.New[element[T]]()
-	newStream := stream[T]{
-		pipeline: func() (T, bool) {
-			item, ok := inputStream.pipeline()
-			if !ok {
-				return item, false
-			} else if set.Contains(element[T]{value: item, equals: equals, hashCode: hashCode}) {
-				var sentinel T
-				return sentinel, false
-			}
-			set.Add(element[T]{value: item, equals: equals, hashCode: hashCode})
-			return item, true
-		},
-		completed:  inputStream.completed,
-		terminated: false,
-	}
-	return &newStream
-}
-
-// Peek Returns a stream consisting of the elements of the given stream but additionaly the given function is invoked for each element.
-func (inputStream *stream[T]) Peek(f func(x T)) Stream[T] {
-	if ok, err := inputStream.valid(); !ok {
-		panic(err)
-	}
-	defer inputStream.close()
-	newStream := stream[T]{
-		pipeline: func() (T, bool) {
-			element, ok := inputStream.pipeline()
+	defer stream.close()
+	return &sequentialStream[T]{
+		source: stream.source,
+		pipeline: func(input T) (T, bool) {
+			element, ok := stream.pipeline(input)
 			if !ok {
 				return element, ok
 			}
 			f(element)
 			return element, ok
 		},
-		completed:  inputStream.completed,
-		terminated: false,
 	}
-	return &newStream
 }
 
-// ForEach performs the given task on each element of the stream.
-func (stream *stream[T]) ForEach(f func(element T)) {
+// Map returns a stream consisting of the results of applying the given transformation function to the elements of this stream.
+func (stream *sequentialStream[T]) Map(f func(element T) T) Stream[T] {
+	if ok, err := stream.valid(); !ok {
+		panic(err)
+	}
+	defer stream.close()
+	return &sequentialStream[T]{
+		source: stream.source,
+		pipeline: func(input T) (T, bool) {
+			element, ok := stream.pipeline(input)
+			if !ok {
+				return element, false
+			}
+			return f(element), ok
+		},
+	}
+}
+
+// Distinct returns a stream consisting of the distinct element of this stream using equals and hashCode for the underlying set.
+func (stream *sequentialStream[T]) Distinct(equals func(x, y T) bool, hashCode func(x T) int) Stream[T] {
+	if ok, err := stream.valid(); !ok {
+		panic(err)
+	}
+	defer stream.close()
+	set := hashset.New[entry[T]]()
+	var mutex sync.Mutex
+	return &sequentialStream[T]{
+		source: stream.source,
+		pipeline: func(input T) (T, bool) {
+			element, ok := stream.pipeline(input)
+			if !ok {
+				return element, false
+			} else {
+				mutex.Lock()
+				defer mutex.Unlock()
+				if set.Contains(entry[T]{value: element, equals: equals, hashCode: hashCode}) {
+					return element, false
+				}
+				set.Add(entry[T]{value: element, equals: equals, hashCode: hashCode})
+				return element, true
+			}
+		},
+	}
+}
+
+// ForEach performs an action for each element of this stream.
+func (stream *sequentialStream[T]) ForEach(f func(element T)) {
 	if ok, err := stream.valid(); !ok {
 		panic(err)
 	}
 	defer stream.terminate()
-	pipeline := stream.getPipeline()
-	for !stream.completed() {
-		element, ok := pipeline()
+	source := stream.source
+	pipeline := stream.pipeline
+	for source.HasNext() {
+		element, ok := pipeline(source.Next())
 		if ok {
 			f(element)
 		}
 	}
 }
 
-// Count returns a count of how many elements are in the stream.
-func (stream *stream[T]) Count() int {
+// Count returns the count of elements in this stream.
+func (stream *sequentialStream[T]) Count() int {
 	if ok, err := stream.valid(); !ok {
 		panic(err)
 	}
 	defer stream.terminate()
-	count := 0
-	pipeline := stream.getPipeline()
-	for !stream.completed() {
-		_, ok := pipeline()
+	source := stream.source
+	pipeline := stream.pipeline
+	counter := 0
+	for source.HasNext() {
+		_, ok := pipeline(source.Next())
 		if ok {
-			count++
+			counter++
 		}
 	}
-	return count
+	return counter
 }
 
-// Reduce returns the result of applying the associative binary function on elements of the stream. The binary operator is only applied if the are
-// at least 2 elements in the stream, otherwise the returned result is invalid and will be indicated by the second returned value.
-func (stream *stream[T]) Reduce(f func(x, y T) T) (T, bool) {
+// Reduce performs a reduction on the elements of this stream, using an associative function.
+func (stream *sequentialStream[T]) Reduce(f func(x, y T) T) (T, bool) {
 	if ok, err := stream.valid(); !ok {
 		panic(err)
 	}
 	defer stream.terminate()
-	pipeline := stream.getPipeline()
+	source := stream.source
+	pipeline := stream.pipeline
 	count := 0
 	var x, y T
-	for !stream.completed() {
-		element, ok := pipeline()
+	for source.HasNext() {
+		element, ok := pipeline(source.Next())
 		if ok {
 			switch count {
 			case 0:
@@ -330,7 +257,6 @@ func (stream *stream[T]) Reduce(f func(x, y T) T) (T, bool) {
 			count++
 		}
 	}
-
 	if count < 1 {
 		var zero T
 		return zero, false
@@ -339,11 +265,20 @@ func (stream *stream[T]) Reduce(f func(x, y T) T) (T, bool) {
 	return x, true
 }
 
-// Collect returns a slice containing the output elements of the stream.
-func (stream *stream[T]) Collect() []T {
+// Collect returns a slice containing the resulting elements from processing the stream.
+func (stream *sequentialStream[T]) Collect() []T {
+	if ok, err := stream.valid(); !ok {
+		panic(err)
+	}
+	defer stream.terminate()
 	slice := make([]T, 0)
-	stream.ForEach(func(element T) {
-		slice = append(slice, element)
-	})
+	source := stream.source
+	pipeline := stream.pipeline
+	for source.HasNext() {
+		element, ok := pipeline(source.Next())
+		if ok {
+			slice = append(slice, element)
+		}
+	}
 	return slice
 }

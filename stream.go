@@ -1,12 +1,7 @@
-// package streams provides java motivated stream API for go. It provides both sequential streams and concurrent streams. The type of stream
-// is specified by a max concurrency parameter that is available in the various stream constructors. The underlying source for a stream can be finit/infinite
-// in the case of an infinite source a sequential stream will process the source correctly if a limit operation is applied before invoking a terminal operation,
-// while for a concurrent stream (max concurrency > 1) an infinite source will lead to an infinite loop even if we apply a limit operation.
+// package streams provides a way of applying a pipeline of operations to a sequence of elements.
 package streams
 
 import (
-	"fmt"
-
 	"github.com/phantom820/collections"
 	"github.com/phantom820/collections/types"
 	"github.com/phantom820/streams/sources"
@@ -22,110 +17,57 @@ type Stream[T any] interface {
 	Skip(n int) Stream[T]                                            // Returns a stream that skips the first n elements it encounters in processing.
 	Distinct(equals func(x, y T) bool, hash func(x T) int) Stream[T] // Returns a stream consisting of distinct elements. Elements are distinguished using equality and hash code.
 	Peek(f func(x T)) Stream[T]                                      // Returns a stream consisting of the elements of the given stream but additionaly the given function is invoked for each element.
+
 	// Terminal operations.
-	ForEach(f func(x T))               // Performs an action specified by the function f for each element of this stream.
+	ForEach(f func(x T))               // Performs an action specified by the function f for each element of the stream.
 	Count() int                        // Returns a count of elements in the stream.
 	Reduce(f func(x, y T) T) (T, bool) // Returns the result of appying a reduction on the elements of the stream. If the stream has no elements then the result would
 	// be invalid and the zero value for T along with false would be returned.
 	Collect() []T // Returns a slice containing the elements from the stream.
 
-	// Util.
+	// State.
 	Terminated() bool // Checks if a terminal operation has been invoked on the stream.
-	Closed() bool     // Checks if a stream has been closed. In stream is closed either when a new stream is created from it using intermediate
+	Closed() bool     // Checks if a stream has been closed. A stream is closed either when a new stream is created from it using intermediate
 	// operations, terminated streams are also closed.
-	Concurrent() bool // Checks if the stream has a max concurrency > 1 or not.
+	Concurrent() bool // Checks if the underlying stream is concurrent or sequential.
 }
 
-// NewFromCollection creates a stream from the given collection with the specified levele of concurrency. If the concurrency is set to 1
-// then the resulting stream is sequential otherwise for values > 1 it is concurrent stream that use no more than the specified number of go routines
-// when processing the stream.
-func NewFromCollection[T types.Equitable[T]](collection collections.Collection[T], maxConcurrency int) Stream[T] {
-	if maxConcurrency < 1 {
-		panic(ErrIllegalConfig(fmt.Sprintf("maxConcurrency=%v", maxConcurrency), "FromCollection"))
+// FromCollection returns a stream that is sequential and uses the given collection as its source.
+func FromCollection[T types.Equitable[T]](collection collections.Collection[T]) Stream[T] {
+	it := collection.Iterator()
+	return &sequentialStream[T]{
+		source:   sources.New(it.Next, it.HasNext),
+		pipeline: func(input T) (T, bool) { return input, true },
 	}
-	if maxConcurrency == 1 {
-		return fromCollection(collection)
-	}
-	return concurrentFromCollection(collection, maxConcurrency)
 }
 
-// NewFromSlice creates a stream which will use the slice obtained from the callback. The callback is invoked only when a terminal operation is used on the stream.
-//  If the concurrency is set to 1 then the resulting stream is sequential otherwise for values > 1 it is concurrent stream that use no more than the specified number of go routines
-// when processing the stream.
-func NewFromSlice[T any](f func() []T, maxConcurrency int) Stream[T] {
-	if maxConcurrency < 1 {
-		panic(ErrIllegalConfig(fmt.Sprintf("maxConcurrency=%v", maxConcurrency), "FromSlice"))
+// ConcurrentFromCollection returns a stream that is concurrent and uses the given collection as its source. Elements are processed
+// in batches of partition size.
+func ConcurrentFromCollection[T types.Equitable[T]](collection collections.Collection[T], concurrency, partitionSize int) Stream[T] {
+	it := collection.Iterator()
+	return &concurrentStream[T]{
+		source:        sources.New(it.Next, it.HasNext),
+		pipeline:      func(input T) (T, bool) { return input, true },
+		concurrency:   concurrency,
+		partitionSize: partitionSize,
 	}
-	if maxConcurrency == 1 {
-		return fromSlice(f)
-	}
-	return concurrentFromSlice(f, maxConcurrency)
 }
 
-// NewFromSource creates a stream from the given collection with the specified level of concurrency. If the concurrency is set to 1
-// then the resulting stream is sequential otherwise for values > 1 it is concurrent stream that use no more than the specified number of go routines
-// when processing the stream. An infinite source should only be used when the stream is sequential and a limit operation will be applied on it,
-// otherwise we will run into an infinite loop in trying to use a concurrent stream with an infinite source even if we apply limit.
-func NewFromSource[T any](source sources.Source[T], maxConcurrency int) Stream[T] {
-	if maxConcurrency < 1 {
-		panic(ErrIllegalConfig(fmt.Sprintf("maxConcurrency=%v", maxConcurrency), "FromSource"))
+// FromSlice returns a sequential stream which will use the given callback to initialize its source when required.
+func FromSlice[T any](f func() []T) Stream[T] {
+	return &sequentialStream[T]{
+		source:   sources.FromSlice(f),
+		pipeline: func(input T) (T, bool) { return input, true },
 	}
-	if maxConcurrency == 1 {
-		return fromSource(source)
-	}
-	return concurrentFromSource(source, maxConcurrency)
 }
 
-// mapSequentialStream for internal use with tope level map function.
-func mapSequentialStream[T any, U any](inputStream *stream[T], f func(e T) U) Stream[U] {
-	if ok, err := inputStream.valid(); !ok {
-		panic(err)
-	}
-	defer inputStream.close()
-	newStream := stream[U]{
-		pipeline: func() (U, bool) {
-			element, ok := inputStream.pipeline()
-			if !ok {
-				var sentinel U
-				return sentinel, ok
-			}
-			return f(element), ok
-		},
-		completed:  inputStream.completed,
-		terminated: false,
-	}
-	return &newStream
-}
-
-// mapConcurrentStream for internal use with tope level map function.
-func mapConcurrentStream[T any, U any](inputStream *concurrentStream[T], f func(e T) U) Stream[U] {
-	if ok, err := inputStream.valid(); !ok {
-		panic(err)
-	}
-	defer inputStream.close()
-	newStream := concurrentStream[U]{
-		pipeline: func(i int) (U, bool) {
-			element, ok := inputStream.pipeline(i)
-			if !ok {
-				var sentinel U
-				return sentinel, ok
-			}
-			return f(element), ok
-		},
-		completed: inputStream.completed,
-		partition: inputStream.partition,
-	}
-	return &newStream
-}
-
-// Map maps the given stream of type T to a new stream of type U. This is to be used when the transformation function f produces a different type .
-func Map[T any, U any](inputStream Stream[T], f func(e T) U) Stream[U] {
-	switch v := inputStream.(type) {
-	case *stream[T]:
-		return mapSequentialStream(v, f)
-	case *concurrentStream[T]:
-		return mapConcurrentStream(v, f)
-	default:
-		panic(ErrIllegalStreamMapping(fmt.Sprint(v)))
+// ConcurrentFromSlice returns a concurrent stream which will use the given callback to initialize its source when required.
+// Elements are processed in batches of partition size.
+func ConcurrentFromSlice[T any](f func() []T, concurrency, partitionSize int) Stream[T] {
+	return &concurrentStream[T]{
+		source:        sources.FromSlice(f),
+		pipeline:      func(input T) (T, bool) { return input, true },
+		concurrency:   concurrency,
+		partitionSize: partitionSize,
 	}
 }
