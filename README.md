@@ -39,11 +39,6 @@ type Stream[T any] interface {
 	Concurrent() bool // Checks if the stream has a max concurrency > 1 or not.
 }
 ```
-#### Note 
-There is a top level Map function to allow maping from one type to another for a stream. 
-```go
-func Map[T any, U any](inputStream Stream[T], f func(e T) U) Stream[U] 
-```
 
 #### Sequential vs Concurrent streams
 | Sequential      | Concurrent |
@@ -59,9 +54,9 @@ func Map[T any, U any](inputStream Stream[T], f func(e T) U) Stream[U]
 slice := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20}
 
 // A sequential stream specifies a max concurreny of 1.
-sequentialStream := streams.NewFromSlice[int](func() []int { return slice }, 1)
-// A concurrent stream specifies a max concurreny value > 1
-concurrentStream := streams.NewFromSlice[int](func() []int { return slice }, 2)
+sequentialStream := streams.romSlice[int](func() []int { return slice })
+// A concurrent stream specifies a level of concurrency and partition size. (concurrency level 2 and partition size 4)
+concurrentStream := streams.NewFromSlice[int](func() []int { return slice }, 2, 4)
 
 ```
 
@@ -69,45 +64,38 @@ concurrentStream := streams.NewFromSlice[int](func() []int { return slice }, 2)
 ##### Filter
 ```go
 slice := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20}
-	newSlice := streams.NewFromSlice(func() []int { return slice }, 1).Filter(func(x int) bool { return x > 10 }).Collect()
+	newSlice := streams.FromSlice(func() []int { return slice }, 1).Filter(func(x int) bool { return x > 10 }).Collect()
 
 // [11 12 13 14 15 16 17 18 19 20]
 ```
 ##### Map
 ```go
 slice := []int{1, 2, 3, 4, 5}
-newSlice := streams.NewFromSlice(func() []int { return slice }, 1).Map(func(x int) interface{} { return x + 1 }).Collect()
+newSlice := streams.FromSlice(func() []int { return slice }, 1).Map(func(x int) interface{} { return x + 1 }).Collect()
 // [2 3 4 5 6]
 ```
 ##### Limit
 ```go
 slice := []int{1, 2, 3, 4, 5}
-newSlice := streams.NewFromSlice(func() []int { return slice }, 1).Limit(2).Collect()
+newSlice := streams.FromSlice(func() []int { return slice }).Limit(2).Collect()
 // [1 2]
 ```
 ##### Distinct
 Requires an equals function and hashcode function for internal hashset.
 ```go
 slice := []int{1, 1, 0, 2, 2, 3, 4, 5, 5}
-newSlice := streams.NewFromSlice(func() []int { return slice }, 1).
+newSlice := streams.FromSlice(func() []int { return slice }).
 Distinct(func(x, y int) bool { return x == y }, func(x int) int { return x }).
 		Collect()
 // [1 0 2 3 4 5]
 ```
 
 #### Complex manipulations
-Transform to ascii value and sum.
-```go
-slice := []rune{'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'}
-stream := streams.NewFromSlice(func() []rune { return slice }, 1)
-val, _ := streams.Map(stream, func(x rune) int { return int(x) }).
-	Reduce(func(x, y int) int { return x + y })
-```
 
 Sum of the even numbers in the range [1,10].
 ```go
 slice := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-sum, ok := streams.NewFromSlice(func() []int { return slice }, 1).
+sum, ok := streams.FromSlice(func() []int { return slice }).
 		Filter(func(x int) bool { return x%2 == 0 }).Reduce(func(x, y int) int { return x + y })
 // 30, true
 ```
@@ -116,7 +104,7 @@ Reduce to lower case and filter out consonants.
 
 slice := []string{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J"}
 
-newSlice := streams.NewFromSlice(func() []string { return slice }, 1).
+newSlice := streams.ConcurrentFromSlice(func() []string { return slice }, 2,4).
 	Map(func(x string) string { return strings.ToLower(x) }).
 	Filter(func(x string) bool { return strings.ContainsAny(x, "aeiou") }).
 	Collect()
