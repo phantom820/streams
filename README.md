@@ -43,20 +43,21 @@ type Stream[T any] interface {
 #### Sequential vs Concurrent streams
 | Sequential      | Concurrent |
 | ----------- | ----------- |
-| Processes its elements sequentially (max concurreny = 1) .    | Processes its elements concurrently using no more than a specified number of go routines (max concurrency > 1).     |
+| Processes its elements sequentially .    | Processes its elements concurrently using no more than a specified number of go routines and elements are processed in batches of the specified partition size by a routine.     |
+| Performs well when cost of processing an element low | Performs well when cost of processing a single element is high and performance may be improved by changin number of routines used and partition size , generally number of go routines and partion sized should somewhat be considered with inverse relationship i.e high number of routines may be better utilized by smaller partitions|
+| Limit, Skip & Distinct operations are cheap | Limit,Skip & Distinct operations are expensive due to locks |
 | Preserves encounter order from the source  | Does not preserve encounter order from the source.      |
-| Infinite source will work if limit operation is applied. | Infinite source will not work in any case |
+| Infinite source not supported. | Infinite source not supported |
 | Reduce operation does not require function to be commutative. | Reduce results may not make sense if given function is not commutative.|
-| Performs well when cost of processing an element low | Performs well when cost of processing a single element is high.|
-| Limit, Skip & Distinct operations are cheap | Limit,Skip & Distinct operations are expensive due to locks | 
+ 
   
 ```go
 slice := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20}
 
-// A sequential stream specifies a max concurreny of 1.
-sequentialStream := streams.romSlice[int](func() []int { return slice })
+// A sequential stream .
+sequentialStream := streams.FromSlice[int](func() []int { return slice })
 // A concurrent stream specifies a level of concurrency and partition size. (concurrency level 2 and partition size 4)
-concurrentStream := streams.NewFromSlice[int](func() []int { return slice }, 2, 4)
+concurrentStream := streams.ConcurrentFromSlice[int](func() []int { return slice }, 2, 4)
 
 ```
 
@@ -64,14 +65,14 @@ concurrentStream := streams.NewFromSlice[int](func() []int { return slice }, 2, 
 ##### Filter
 ```go
 slice := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20}
-	newSlice := streams.FromSlice(func() []int { return slice }, 1).Filter(func(x int) bool { return x > 10 }).Collect()
+	newSlice := streams.FromSlice(func() []int { return slice }).Filter(func(x int) bool { return x > 10 }).Collect()
 
 // [11 12 13 14 15 16 17 18 19 20]
 ```
 ##### Map
 ```go
 slice := []int{1, 2, 3, 4, 5}
-newSlice := streams.FromSlice(func() []int { return slice }, 1).Map(func(x int) interface{} { return x + 1 }).Collect()
+newSlice := streams.FromSlice(func() []int { return slice }).Map(func(x int) interface{} { return x + 1 }).Collect()
 // [2 3 4 5 6]
 ```
 ##### Limit
