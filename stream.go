@@ -2,12 +2,15 @@
 package streams
 
 import (
+	"fmt"
+
 	"github.com/phantom820/collections"
 	"github.com/phantom820/collections/types"
 	"github.com/phantom820/streams/sources"
 )
 
-// Stream a sequence of elements that can be operated on sequential / concurrently.
+// Stream a sequence of elements that can be operated on sequential / concurrently. The underlying source for a stream should be finite, infinite sources
+// are not supported and will lead to an infinite loop.
 type Stream[T any] interface {
 
 	// Intermediate operations.
@@ -30,6 +33,7 @@ type Stream[T any] interface {
 	Closed() bool     // Checks if a stream has been closed. A stream is closed either when a new stream is created from it using intermediate
 	// operations, terminated streams are also closed.
 	Concurrent() bool // Checks if the underlying stream is concurrent or sequential.
+
 }
 
 // FromCollection returns a stream that is sequential and uses the given collection as its source.
@@ -44,6 +48,11 @@ func FromCollection[T types.Equitable[T]](collection collections.Collection[T]) 
 // ConcurrentFromCollection returns a stream that is concurrent and uses the given collection as its source. Elements are processed
 // in batches of partition size.
 func ConcurrentFromCollection[T types.Equitable[T]](collection collections.Collection[T], concurrency, partitionSize int) Stream[T] {
+	if concurrency <= 1 {
+		panic(errIllegalConfig(fmt.Sprintf("concurrency=%v", concurrency), "ConcurrentFromCollection"))
+	} else if partitionSize < 1 {
+		panic(errIllegalConfig(fmt.Sprintf("partitionSize=%v", concurrency), "ConcurrentFromCollection"))
+	}
 	it := collection.Iterator()
 	return &concurrentStream[T]{
 		source:        sources.New(it.Next, it.HasNext),
@@ -64,8 +73,36 @@ func FromSlice[T any](f func() []T) Stream[T] {
 // ConcurrentFromSlice returns a concurrent stream which will use the given callback to initialize its source when required.
 // Elements are processed in batches of partition size.
 func ConcurrentFromSlice[T any](f func() []T, concurrency, partitionSize int) Stream[T] {
+	if concurrency <= 1 {
+		panic(errIllegalConfig(fmt.Sprintf("concurrency=%v", concurrency), "ConcurrentFromSlice"))
+	} else if partitionSize < 1 {
+		panic(errIllegalConfig(fmt.Sprintf("partitionSize=%v", concurrency), "ConcurrentFromSlice"))
+	}
 	return &concurrentStream[T]{
 		source:        sources.FromSlice(f),
+		pipeline:      func(input T) (T, bool) { return input, true },
+		concurrency:   concurrency,
+		partitionSize: partitionSize,
+	}
+}
+
+// FromSource returns a sequential stream that processes elements from the given source.
+func FromSource[T any](source sources.Source[T]) Stream[T] {
+	return &sequentialStream[T]{
+		source:   source,
+		pipeline: func(input T) (T, bool) { return input, true },
+	}
+}
+
+// ConcurrentFromSource returns a concurrent stream that processes elements from the given source.
+func ConcurrentFromSource[T any](source sources.Source[T], concurrency, partitionSize int) Stream[T] {
+	if concurrency <= 1 {
+		panic(errIllegalConfig(fmt.Sprintf("concurrency=%v", concurrency), "ConcurrentFromSource"))
+	} else if partitionSize < 1 {
+		panic(errIllegalConfig(fmt.Sprintf("partitionSize=%v", concurrency), "ConcurrentFromSource"))
+	}
+	return &concurrentStream[T]{
+		source:        source,
 		pipeline:      func(input T) (T, bool) { return input, true },
 		concurrency:   concurrency,
 		partitionSize: partitionSize,

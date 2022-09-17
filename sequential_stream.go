@@ -14,6 +14,7 @@ type sequentialStream[T any] struct {
 	pipeline   func(input T) (T, bool) // pipeline with operations of the stream.
 	terminated bool                    // terminated indicates if a terminal operation has been invoked on the stream.
 	closed     bool                    //closed indicates if a new stream has been derived from the stream or it has been terminated.
+	distinct   bool                    // distinct keeps track of whether the stream has distinc elements or not.
 }
 
 // terminate terminates the stream when a terminal operation is invoked on it.
@@ -60,15 +61,18 @@ func (stream *sequentialStream[T]) Filter(f func(element T) bool) Stream[T] {
 		panic(err)
 	}
 	defer stream.close()
+	source := stream.source
+	pipeline := stream.pipeline
 	return &sequentialStream[T]{
-		source: stream.source,
+		source: source,
 		pipeline: func(input T) (T, bool) {
-			element, ok := stream.pipeline(input)
+			element, ok := pipeline(input)
 			if !ok {
 				return element, ok
 			}
 			return element, f(element)
 		},
+		distinct: stream.distinct,
 	}
 }
 
@@ -80,11 +84,13 @@ func (stream *sequentialStream[T]) Limit(limit int) Stream[T] {
 		panic(errIllegalArgument("Limit", fmt.Sprint(limit)))
 	}
 	defer stream.close()
+	source := stream.source
+	pipeline := stream.pipeline
 	counter := 0
 	return &sequentialStream[T]{
-		source: stream.source,
+		source: source,
 		pipeline: func(input T) (T, bool) {
-			element, ok := stream.pipeline(input)
+			element, ok := pipeline(input)
 			if !ok {
 				return element, ok
 			} else {
@@ -95,6 +101,7 @@ func (stream *sequentialStream[T]) Limit(limit int) Stream[T] {
 				return element, false
 			}
 		},
+		distinct: stream.distinct,
 	}
 }
 
@@ -107,12 +114,14 @@ func (stream *sequentialStream[T]) Skip(n int) Stream[T] {
 		panic(errIllegalArgument("Skip", fmt.Sprint(n)))
 	}
 	defer stream.close()
+	source := stream.source
+	pipeline := stream.pipeline
 	skipped := atomicCounter{}
 	var mutex sync.Mutex
 	return &sequentialStream[T]{
-		source: stream.source,
+		source: source,
 		pipeline: func(input T) (T, bool) {
-			element, ok := stream.pipeline(input)
+			element, ok := pipeline(input)
 			if !ok {
 				return element, ok
 			} else {
@@ -125,6 +134,7 @@ func (stream *sequentialStream[T]) Skip(n int) Stream[T] {
 				return element, true
 			}
 		},
+		distinct: stream.distinct,
 	}
 }
 
@@ -134,16 +144,19 @@ func (stream *sequentialStream[T]) Peek(f func(element T)) Stream[T] {
 		panic(err)
 	}
 	defer stream.close()
+	source := stream.source
+	pipeline := stream.pipeline
 	return &sequentialStream[T]{
-		source: stream.source,
+		source: source,
 		pipeline: func(input T) (T, bool) {
-			element, ok := stream.pipeline(input)
+			element, ok := pipeline(input)
 			if !ok {
 				return element, ok
 			}
 			f(element)
 			return element, ok
 		},
+		distinct: stream.distinct,
 	}
 }
 
@@ -153,15 +166,18 @@ func (stream *sequentialStream[T]) Map(f func(element T) T) Stream[T] {
 		panic(err)
 	}
 	defer stream.close()
+	source := stream.source
+	pipeline := stream.pipeline
 	return &sequentialStream[T]{
-		source: stream.source,
+		source: source,
 		pipeline: func(input T) (T, bool) {
-			element, ok := stream.pipeline(input)
+			element, ok := pipeline(input)
 			if !ok {
 				return element, false
 			}
 			return f(element), ok
 		},
+		distinct: false,
 	}
 }
 
@@ -171,15 +187,21 @@ func (stream *sequentialStream[T]) Distinct(equals func(x, y T) bool, hashCode f
 		panic(err)
 	}
 	defer stream.close()
+	source := stream.source
+	pipeline := stream.pipeline
 	set := hashset.New[entry[T]]()
+	alreadyDistinct := stream.distinct
 	var mutex sync.Mutex
 	return &sequentialStream[T]{
-		source: stream.source,
+		source: source,
 		pipeline: func(input T) (T, bool) {
-			element, ok := stream.pipeline(input)
+			element, ok := pipeline(input)
 			if !ok {
 				return element, false
 			} else {
+				if alreadyDistinct { // parent stream was already has distinc elements.
+					return element, ok
+				}
 				mutex.Lock()
 				defer mutex.Unlock()
 				if set.Contains(entry[T]{value: element, equals: equals, hashCode: hashCode}) {
@@ -189,6 +211,7 @@ func (stream *sequentialStream[T]) Distinct(equals func(x, y T) bool, hashCode f
 				return element, true
 			}
 		},
+		distinct: true,
 	}
 }
 
