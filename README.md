@@ -49,6 +49,7 @@ type Stream[T any] interface {
 | Preserves encounter order from the source  | Does not preserve encounter order from the source.      |
 | Infinite source not supported. | Infinite source not supported |
 | Reduce operation does not require function to be commutative. | Reduce results may not make sense if given function is not commutative.|
+| ForEach side effects can be used | ForEach side effects lead to race conditions and should not be used.|
  
   
 ```go
