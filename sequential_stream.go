@@ -2,30 +2,30 @@ package streams
 
 import (
 	"fmt"
-	"sync"
 
-	"github.com/phantom820/collections/sets/hashset"
-	"github.com/phantom820/streams/sources"
+	"github.com/phantom820/streams/operator"
 )
 
 // sequentialStream sequential stream implementation.
 type sequentialStream[T any] struct {
-	source     sources.Source[T]       // source of elements for the stream.
-	pipeline   func(input T) (T, bool) // pipeline with operations of the stream.
-	terminated bool                    // terminated indicates if a terminal operation has been invoked on the stream.
-	closed     bool                    //closed indicates if a new stream has been derived from the stream or it has been terminated.
-	distinct   bool                    // distinct keeps track of whether the stream has distinc elements or not.
+	data                  func() []T                         // The callback for retrieving the data the stream will process
+	intermediateOperators []operator.IntermediateOperator[T] // The sequence of operations that the stream will apply to elements.
+	terminated            bool                               // Indicates if a terminal operation has been invoked on the stream.
+	closed                bool                               // Indicates if a new stream has been derived from the stream or it has been terminated.
+	distinct              bool                               // Keeps track of whether the stream has distinc elements or not.
 }
 
 // terminate terminates the stream when a terminal operation is invoked on it.
 func (stream *sequentialStream[T]) terminate() {
 	stream.terminated = true
 	stream.closed = true
+	stream.intermediateOperators = nil
 }
 
 // close closes the stream when a new stream is derived from it.
 func (stream *sequentialStream[T]) close() {
 	stream.closed = true
+	stream.intermediateOperators = nil
 }
 
 // valid checks if a stream is valid for any type of operation.
@@ -61,18 +61,11 @@ func (stream *sequentialStream[T]) Filter(f func(element T) bool) Stream[T] {
 		panic(err)
 	}
 	defer stream.close()
-	source := stream.source
-	pipeline := stream.pipeline
+
 	return &sequentialStream[T]{
-		source: source,
-		pipeline: func(input T) (T, bool) {
-			element, ok := pipeline(input)
-			if !ok {
-				return element, ok
-			}
-			return element, f(element)
-		},
-		distinct: stream.distinct,
+		data:                  stream.data,
+		intermediateOperators: append(stream.intermediateOperators, operator.Filter(f)),
+		distinct:              stream.distinct,
 	}
 }
 
@@ -84,25 +77,13 @@ func (stream *sequentialStream[T]) Limit(limit int) Stream[T] {
 		panic(errIllegalArgument("Limit", fmt.Sprint(limit)))
 	}
 	defer stream.close()
-	source := stream.source
-	pipeline := stream.pipeline
-	counter := 0
+
 	return &sequentialStream[T]{
-		source: source,
-		pipeline: func(input T) (T, bool) {
-			element, ok := pipeline(input)
-			if !ok {
-				return element, ok
-			} else {
-				if counter < limit {
-					counter++
-					return element, ok
-				}
-				return element, false
-			}
-		},
-		distinct: stream.distinct,
+		data:                  stream.data,
+		intermediateOperators: append(stream.intermediateOperators, operator.Limit[T](limit)),
+		distinct:              stream.distinct,
 	}
+
 }
 
 // Skip returns a stream consisting of the remaining elements of this stream after skipping the first n elements of the stream.
@@ -114,27 +95,11 @@ func (stream *sequentialStream[T]) Skip(n int) Stream[T] {
 		panic(errIllegalArgument("Skip", fmt.Sprint(n)))
 	}
 	defer stream.close()
-	source := stream.source
-	pipeline := stream.pipeline
-	skipped := atomicCounter{}
-	var mutex sync.Mutex
+
 	return &sequentialStream[T]{
-		source: source,
-		pipeline: func(input T) (T, bool) {
-			element, ok := pipeline(input)
-			if !ok {
-				return element, ok
-			} else {
-				mutex.Lock()
-				defer mutex.Unlock()
-				if skipped.read() < n {
-					skipped.add(1)
-					return element, false
-				}
-				return element, true
-			}
-		},
-		distinct: stream.distinct,
+		data:                  stream.data,
+		intermediateOperators: append(stream.intermediateOperators, operator.Skip[T](n)),
+		distinct:              stream.distinct,
 	}
 }
 
@@ -144,19 +109,11 @@ func (stream *sequentialStream[T]) Peek(f func(element T)) Stream[T] {
 		panic(err)
 	}
 	defer stream.close()
-	source := stream.source
-	pipeline := stream.pipeline
+
 	return &sequentialStream[T]{
-		source: source,
-		pipeline: func(input T) (T, bool) {
-			element, ok := pipeline(input)
-			if !ok {
-				return element, ok
-			}
-			f(element)
-			return element, ok
-		},
-		distinct: stream.distinct,
+		data:                  stream.data,
+		intermediateOperators: append(stream.intermediateOperators, operator.Peek(f)),
+		distinct:              stream.distinct,
 	}
 }
 
@@ -166,18 +123,11 @@ func (stream *sequentialStream[T]) Map(f func(element T) T) Stream[T] {
 		panic(err)
 	}
 	defer stream.close()
-	source := stream.source
-	pipeline := stream.pipeline
+
 	return &sequentialStream[T]{
-		source: source,
-		pipeline: func(input T) (T, bool) {
-			element, ok := pipeline(input)
-			if !ok {
-				return element, false
-			}
-			return f(element), ok
-		},
-		distinct: false,
+		data:                  stream.data,
+		intermediateOperators: append(stream.intermediateOperators, operator.Map(f)),
+		distinct:              false,
 	}
 }
 
@@ -187,31 +137,13 @@ func (stream *sequentialStream[T]) Distinct(equals func(x, y T) bool, hashCode f
 		panic(err)
 	}
 	defer stream.close()
-	source := stream.source
-	pipeline := stream.pipeline
-	set := hashset.New[entry[T]]()
+
 	alreadyDistinct := stream.distinct
-	var mutex sync.Mutex
+
 	return &sequentialStream[T]{
-		source: source,
-		pipeline: func(input T) (T, bool) {
-			element, ok := pipeline(input)
-			if !ok {
-				return element, false
-			} else {
-				if alreadyDistinct { // parent stream was already has distinc elements.
-					return element, ok
-				}
-				mutex.Lock()
-				defer mutex.Unlock()
-				if set.Contains(entry[T]{value: element, equals: equals, hashCode: hashCode}) {
-					return element, false
-				}
-				set.Add(entry[T]{value: element, equals: equals, hashCode: hashCode})
-				return element, true
-			}
-		},
-		distinct: true,
+		data:                  stream.data,
+		intermediateOperators: append(stream.intermediateOperators, operator.Distinct(alreadyDistinct, equals, hashCode)),
+		distinct:              true,
 	}
 }
 
@@ -221,14 +153,11 @@ func (stream *sequentialStream[T]) ForEach(f func(element T)) {
 		panic(err)
 	}
 	defer stream.terminate()
-	source := stream.source
-	pipeline := stream.pipeline
-	for source.HasNext() {
-		element, ok := pipeline(source.Next())
-		if ok {
-			f(element)
-		}
-	}
+
+	data := stream.data()
+	operators := operator.Sort(stream.intermediateOperators)
+	forEach(f, operators, data)
+
 }
 
 // Count returns the count of elements in this stream.
@@ -237,16 +166,11 @@ func (stream *sequentialStream[T]) Count() int {
 		panic(err)
 	}
 	defer stream.terminate()
-	source := stream.source
-	pipeline := stream.pipeline
-	counter := 0
-	for source.HasNext() {
-		_, ok := pipeline(source.Next())
-		if ok {
-			counter++
-		}
-	}
-	return counter
+
+	data := stream.data()
+	operators := operator.Sort(stream.intermediateOperators)
+
+	return count(operators, data)
 }
 
 // Reduce performs a reduction on the elements of this stream, using an associative function.
@@ -255,37 +179,11 @@ func (stream *sequentialStream[T]) Reduce(f func(x, y T) T) (T, bool) {
 		panic(err)
 	}
 	defer stream.terminate()
-	source := stream.source
-	pipeline := stream.pipeline
-	count := 0
-	var x, y T
-	for source.HasNext() {
-		element, ok := pipeline(source.Next())
-		if ok {
-			switch count {
-			case 0:
-				x = element
-				break
-			case 1:
-				y = element
-				x = f(x, y)
-				break
-			case 2:
-				x = f(x, element)
-				break
-			default:
-				x = f(x, element)
-				break
-			}
-			count++
-		}
-	}
-	if count < 1 {
-		var zero T
-		return zero, false
-	}
 
-	return x, true
+	data := stream.data()
+	operators := operator.Sort(stream.intermediateOperators)
+
+	return reduce(f, operators, data)
 }
 
 // Collect returns a slice containing the resulting elements from processing the stream.
@@ -294,14 +192,9 @@ func (stream *sequentialStream[T]) Collect() []T {
 		panic(err)
 	}
 	defer stream.terminate()
-	slice := make([]T, 0)
-	source := stream.source
-	pipeline := stream.pipeline
-	for source.HasNext() {
-		element, ok := pipeline(source.Next())
-		if ok {
-			slice = append(slice, element)
-		}
-	}
-	return slice
+
+	data := stream.data()
+	operators := operator.Sort(stream.intermediateOperators)
+
+	return collect(operators, data)
 }

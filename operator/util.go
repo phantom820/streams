@@ -1,8 +1,8 @@
-package streams
+package operator
 
 import "sync/atomic"
 
-// atomicCountera counter.
+// atomicCounter counter.
 type atomicCounter struct {
 	number uint64
 }

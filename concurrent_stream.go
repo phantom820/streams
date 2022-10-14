@@ -2,21 +2,27 @@ package streams
 
 import (
 	"fmt"
+	"math"
 	"sync"
 
-	"github.com/phantom820/collections/sets/hashset"
-	"github.com/phantom820/streams/sources"
+	"github.com/phantom820/streams/operator"
 )
+
+// import (
+// 	"fmt"
+
+// 	"github.com/phantom820/streams/operations"
+// 	"github.com/phantom820/streams/sources"
+// )
 
 // concurrentStream sequential stream concrete type.
 type concurrentStream[T any] struct {
-	source        sources.Source[T]       // source of elements for the stream.
-	pipeline      func(input T) (T, bool) // pipeline with operations of the stream.
-	terminated    bool                    // terminated indicates if a terminal operation has been invoked on the stream.
-	closed        bool                    // closed indicates if a new stream has been derived from the stream or it has been terminated.
-	concurrency   int                     // concurrency indicates the concurrency level of the stream.
-	partitionSize int                     // partitionSize the number of elements each go routine should process independently.
-	distinct      bool                    // distinct keeps track of whether the stream has distinc elements or not.
+	data                  func() []T                         // The callback for retrieving the data the stream will process
+	intermediateOperators []operator.IntermediateOperator[T] // The sequence of operations that the stream will apply to elements.
+	terminated            bool                               // Indicates if a terminal operation has been invoked on the stream.
+	closed                bool                               // Indicates if a new stream has been derived from the stream or it has been terminated.
+	distinct              bool                               // Keeps track of whether the stream has distinc elements or not.
+	concurrency           int                                // Indicates maximum go routines to use when processing stream
 
 }
 
@@ -24,21 +30,13 @@ type concurrentStream[T any] struct {
 func (stream *concurrentStream[T]) terminate() {
 	stream.terminated = true
 	stream.closed = true
+	stream.intermediateOperators = nil
 }
 
 // close closes the stream when a new stream is derived from it.
 func (stream *concurrentStream[T]) close() {
 	stream.closed = true
-}
-
-// Terminated returns termination status of the stream.
-func (stream *concurrentStream[T]) Terminated() bool {
-	return stream.terminated
-}
-
-// Closed returns closure status of the stream.
-func (stream *concurrentStream[T]) Closed() bool {
-	return stream.closed
+	stream.intermediateOperators = nil
 }
 
 // valid checks if a stream is valid for any type of operation.
@@ -53,9 +51,19 @@ func (stream *concurrentStream[T]) valid() (bool, *streamError) {
 	return true, nil
 }
 
-// Concurrent returns true always.
+// Terminated returns termination status of the stream.
+func (stream *concurrentStream[T]) Terminated() bool {
+	return stream.terminated
+}
+
+// Closed returns closure status of the stream.
+func (stream *concurrentStream[T]) Closed() bool {
+	return stream.closed
+}
+
+// Concurrent returns false always since its a sequential stream..
 func (stream *concurrentStream[T]) Concurrent() bool {
-	return true
+	return false
 }
 
 // Filter returns a stream consisting of the elements of this stream that match the given predicate function.
@@ -64,20 +72,12 @@ func (stream *concurrentStream[T]) Filter(f func(element T) bool) Stream[T] {
 		panic(err)
 	}
 	defer stream.close()
-	source := stream.source
-	pipeline := stream.pipeline
+
 	return &concurrentStream[T]{
-		source: source,
-		pipeline: func(input T) (T, bool) {
-			element, ok := pipeline(input)
-			if !ok {
-				return element, ok
-			}
-			return element, f(element)
-		},
-		partitionSize: stream.partitionSize,
-		concurrency:   stream.concurrency,
-		distinct:      stream.distinct,
+		concurrency:           stream.concurrency,
+		data:                  stream.data,
+		intermediateOperators: append(stream.intermediateOperators, operator.Filter(f)),
+		distinct:              stream.distinct,
 	}
 }
 
@@ -89,30 +89,14 @@ func (stream *concurrentStream[T]) Limit(limit int) Stream[T] {
 		panic(errIllegalArgument("Limit", fmt.Sprint(limit)))
 	}
 	defer stream.close()
-	source := stream.source
-	pipeline := stream.pipeline
-	counter := atomicCounter{}
-	var mutex sync.Mutex
+
 	return &concurrentStream[T]{
-		source: source,
-		pipeline: func(input T) (T, bool) {
-			element, ok := pipeline(input)
-			if !ok {
-				return element, ok
-			} else {
-				mutex.Lock()
-				defer mutex.Unlock()
-				if counter.read() < limit {
-					counter.add(1)
-					return element, ok
-				}
-				return element, false
-			}
-		},
-		partitionSize: stream.partitionSize,
-		concurrency:   stream.concurrency,
-		distinct:      stream.distinct,
+		concurrency:           stream.concurrency,
+		data:                  stream.data,
+		intermediateOperators: append(stream.intermediateOperators, operator.ConcurrentLimit[T](limit)),
+		distinct:              stream.distinct,
 	}
+
 }
 
 // Skip returns a stream consisting of the remaining elements of this stream after skipping the first n elements of the stream.
@@ -124,29 +108,12 @@ func (stream *concurrentStream[T]) Skip(n int) Stream[T] {
 		panic(errIllegalArgument("Skip", fmt.Sprint(n)))
 	}
 	defer stream.close()
-	source := stream.source
-	pipeline := stream.pipeline
-	skipped := atomicCounter{}
-	var mutex sync.Mutex
+
 	return &concurrentStream[T]{
-		source: source,
-		pipeline: func(input T) (T, bool) {
-			element, ok := pipeline(input)
-			if !ok {
-				return element, ok
-			} else {
-				mutex.Lock()
-				defer mutex.Unlock()
-				if skipped.read() < n {
-					skipped.add(1)
-					return element, false
-				}
-				return element, true
-			}
-		},
-		partitionSize: stream.partitionSize,
-		concurrency:   stream.concurrency,
-		distinct:      stream.distinct,
+		concurrency:           stream.concurrency,
+		data:                  stream.data,
+		intermediateOperators: append(stream.intermediateOperators, operator.ConcurrentSkip[T](n)),
+		distinct:              stream.distinct,
 	}
 }
 
@@ -156,21 +123,12 @@ func (stream *concurrentStream[T]) Peek(f func(element T)) Stream[T] {
 		panic(err)
 	}
 	defer stream.close()
-	source := stream.source
-	pipeline := stream.pipeline
+
 	return &concurrentStream[T]{
-		source: source,
-		pipeline: func(input T) (T, bool) {
-			element, ok := pipeline(input)
-			if !ok {
-				return element, ok
-			}
-			f(element)
-			return element, ok
-		},
-		partitionSize: stream.partitionSize,
-		concurrency:   stream.concurrency,
-		distinct:      stream.distinct,
+		concurrency:           stream.concurrency,
+		data:                  stream.data,
+		intermediateOperators: append(stream.intermediateOperators, operator.Peek(f)),
+		distinct:              stream.distinct,
 	}
 }
 
@@ -180,20 +138,12 @@ func (stream *concurrentStream[T]) Map(f func(element T) T) Stream[T] {
 		panic(err)
 	}
 	defer stream.close()
-	source := stream.source
-	pipeline := stream.pipeline
+
 	return &concurrentStream[T]{
-		source: source,
-		pipeline: func(input T) (T, bool) {
-			element, ok := pipeline(input)
-			if !ok {
-				return element, false
-			}
-			return f(element), ok
-		},
-		partitionSize: stream.partitionSize,
-		concurrency:   stream.concurrency,
-		distinct:      false,
+		concurrency:           stream.concurrency,
+		data:                  stream.data,
+		intermediateOperators: append(stream.intermediateOperators, operator.Map(f)),
+		distinct:              false,
 	}
 }
 
@@ -203,33 +153,14 @@ func (stream *concurrentStream[T]) Distinct(equals func(x, y T) bool, hashCode f
 		panic(err)
 	}
 	defer stream.close()
-	source := stream.source
-	pipeline := stream.pipeline
-	set := hashset.New[entry[T]]()
+
 	alreadyDistinct := stream.distinct
-	var mutex sync.Mutex
+
 	return &concurrentStream[T]{
-		source: source,
-		pipeline: func(input T) (T, bool) {
-			element, ok := pipeline(input)
-			if !ok {
-				return element, false
-			} else {
-				if alreadyDistinct { // parent stream was already has distinc elements.
-					return element, ok
-				}
-				mutex.Lock()
-				defer mutex.Unlock()
-				if set.Contains(entry[T]{value: element, equals: equals, hashCode: hashCode}) {
-					return element, false
-				}
-				set.Add(entry[T]{value: element, equals: equals, hashCode: hashCode})
-				return element, true
-			}
-		},
-		partitionSize: stream.partitionSize,
-		concurrency:   stream.concurrency,
-		distinct:      true,
+		concurrency:           stream.concurrency,
+		data:                  stream.data,
+		intermediateOperators: append(stream.intermediateOperators, operator.ConcurrentDistinct(alreadyDistinct, equals, hashCode)),
+		distinct:              true,
 	}
 }
 
@@ -239,8 +170,25 @@ func (stream *concurrentStream[T]) ForEach(f func(element T)) {
 		panic(err)
 	}
 	defer stream.terminate()
-	limiter := make(chan struct{}, stream.concurrency)
-	scatterForEach(stream.source, stream.partitionSize, stream.pipeline, f, limiter)
+
+	work := func(wg *sync.WaitGroup, operators []operator.IntermediateOperator[T], partition []T) {
+		defer wg.Done()
+		forEach(f, operators, partition)
+	}
+
+	data := stream.data()
+	operators := operator.Sort(stream.intermediateOperators)
+	partitionSize := len(data) / stream.concurrency
+	numberOfPartions := int(math.Ceil(float64(len(data)) / float64(partitionSize)))
+	intervals := partition(len(data), numberOfPartions)
+	var wg sync.WaitGroup
+
+	for i := 0; i < len(intervals)-1; i++ {
+		wg.Add(1)
+		go work(&wg, operators, data[intervals[i]:intervals[i+1]])
+	}
+	wg.Wait()
+
 }
 
 // Count returns the count of elements in this stream.
@@ -249,8 +197,28 @@ func (stream *concurrentStream[T]) Count() int {
 		panic(err)
 	}
 	defer stream.terminate()
-	limiter := make(chan struct{}, stream.concurrency)
-	return scatterCount(stream.source, stream.partitionSize, stream.pipeline, limiter)
+
+	work := func(operators []operator.IntermediateOperator[T], partition []T, outputChannel chan int) {
+		outputChannel <- count(operators, partition)
+	}
+
+	data := stream.data()
+	operators := operator.Sort(stream.intermediateOperators)
+	partitionSize := len(data) / stream.concurrency
+	numberOfPartions := int(math.Ceil(float64(len(data)) / float64(partitionSize)))
+	intervals := partition(len(data), numberOfPartions)
+	outputChannel := make(chan int, numberOfPartions)
+
+	for i := 0; i < len(intervals)-1; i++ {
+		go work(operators, data[intervals[i]:intervals[i+1]], outputChannel)
+	}
+
+	count := 0
+	for i := 0; i < numberOfPartions; i++ {
+		count = count + <-outputChannel
+	}
+
+	return count
 }
 
 // Reduce performs a reduction on the elements of this stream, using an associative function.
@@ -259,8 +227,31 @@ func (stream *concurrentStream[T]) Reduce(f func(x, y T) T) (T, bool) {
 		panic(err)
 	}
 	defer stream.terminate()
-	limiter := make(chan struct{}, stream.concurrency)
-	return scatterReduce(stream.source, stream.partitionSize, stream.pipeline, f, limiter)
+
+	work := func(operators []operator.IntermediateOperator[T], partition []T, outputChannel chan []T) {
+		result, ok := reduce(f, operators, partition)
+		if !ok {
+			outputChannel <- []T{}
+			return
+		}
+		outputChannel <- []T{result}
+	}
+
+	data := stream.data()
+	operators := operator.Sort(stream.intermediateOperators)
+	partitionSize := len(data) / stream.concurrency
+	numberOfPartions := int(math.Ceil(float64(len(data)) / float64(partitionSize)))
+	intervals := partition(len(data), numberOfPartions)
+	outputChannel := make(chan []T, numberOfPartions)
+
+	for i := 0; i < len(intervals)-1; i++ {
+		go work(operators, data[intervals[i]:intervals[i+1]], outputChannel)
+	}
+	partialResults := make([]T, 0)
+	for i := 0; i < numberOfPartions; i++ {
+		partialResults = append(partialResults, <-outputChannel...)
+	}
+	return reduce(f, []operator.IntermediateOperator[T]{}, partialResults)
 }
 
 // Collect returns a slice containing the resulting elements from processing the stream.
@@ -269,7 +260,26 @@ func (stream *concurrentStream[T]) Collect() []T {
 		panic(err)
 	}
 	defer stream.terminate()
-	limiter := make(chan struct{}, stream.concurrency)
-	return scatterGather(stream.source, stream.partitionSize, stream.pipeline, limiter)
 
+	work := func(operators []operator.IntermediateOperator[T], partition []T, ouputChannel chan []T) {
+		ouputChannel <- collect(operators, partition)
+	}
+
+	data := stream.data()
+	operators := operator.Sort(stream.intermediateOperators)
+	partitionSize := len(data) / stream.concurrency
+	numberOfPartions := int(math.Ceil(float64(len(data)) / float64(partitionSize)))
+	intervals := partition(len(data), numberOfPartions)
+	outputChannel := make(chan []T, numberOfPartions)
+
+	for i := 0; i < len(intervals)-1; i++ {
+		go work(operators, data[intervals[i]:intervals[i+1]], outputChannel)
+	}
+
+	results := make([]T, 0)
+	for i := 0; i < numberOfPartions; i++ {
+		results = append(results, <-outputChannel...)
+	}
+
+	return results
 }

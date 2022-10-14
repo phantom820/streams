@@ -4,9 +4,7 @@ package streams
 import (
 	"fmt"
 
-	"github.com/phantom820/collections"
-	"github.com/phantom820/collections/types"
-	"github.com/phantom820/streams/sources"
+	"github.com/phantom820/streams/operator"
 )
 
 // Stream a sequence of elements that can be operated on sequential / concurrently. The underlying source for a stream should be finite, infinite sources
@@ -36,75 +34,96 @@ type Stream[T any] interface {
 
 }
 
-// FromCollection returns a stream that is sequential and uses the given collection as its source.
-func FromCollection[T types.Equitable[T]](collection collections.Collection[T]) Stream[T] {
-	it := collection.Iterator()
-	return &sequentialStream[T]{
-		source:   sources.New(it.Next, it.HasNext),
-		pipeline: func(input T) (T, bool) { return input, true },
+// FromSlice returns a sequential stream which will use the given callback to obtain elements when terminal operation is invoked.
+func FromSlice[T any](f func() []T, concurrency int) Stream[T] {
+	if concurrency < 1 {
+		panic(errIllegalConfig(fmt.Sprintf("concurrency=%v", concurrency), "FromSlice"))
+	} else if concurrency == 1 {
+		return &sequentialStream[T]{
+			data:                  f,
+			intermediateOperators: make([]operator.IntermediateOperator[T], 0),
+		}
 	}
-}
 
-// ConcurrentFromCollection returns a stream that is concurrent and uses the given collection as its source. Elements are processed
-// in batches of partition size.
-func ConcurrentFromCollection[T types.Equitable[T]](collection collections.Collection[T], concurrency, partitionSize int) Stream[T] {
-	if concurrency <= 1 {
-		panic(errIllegalConfig(fmt.Sprintf("concurrency=%v", concurrency), "ConcurrentFromCollection"))
-	} else if partitionSize < 1 {
-		panic(errIllegalConfig(fmt.Sprintf("partitionSize=%v", concurrency), "ConcurrentFromCollection"))
-	}
-	it := collection.Iterator()
 	return &concurrentStream[T]{
-		source:        sources.New(it.Next, it.HasNext),
-		pipeline:      func(input T) (T, bool) { return input, true },
-		concurrency:   concurrency,
-		partitionSize: partitionSize,
+		concurrency:           concurrency,
+		data:                  f,
+		intermediateOperators: make([]operator.IntermediateOperator[T], 0),
+	}
+
+}
+
+// partition creates a number of sub intervals in the range [0,n].
+func partition(n int, numberOfPartitions int) []int {
+	if n == 0 {
+		return []int{}
+	}
+	intervals := []int{}
+	partitionSize := n / numberOfPartitions
+
+	for i := 0; i < numberOfPartitions; i++ {
+		intervals = append(intervals, i*partitionSize)
+	}
+
+	intervals = append(intervals, n)
+	return intervals
+}
+
+// apply applies the give list of operations to givene element and returns a result and whether the result is valid or not.
+func apply[T any](operators []operator.IntermediateOperator[T], x T) (T, bool) {
+	for _, operator := range operators {
+		y, ok := operator.Apply(x)
+		if !ok {
+			return y, false
+		}
+		x = y
+	}
+	return x, true
+}
+
+// count returns a count of elements that operations were succesfully applied to. This is for implementing Count on a stream.
+func count[T any](operators []operator.IntermediateOperator[T], data []T) int {
+	count := 0
+	for _, x := range data {
+		if _, ok := apply(operators, x); ok {
+			count++
+		}
+	}
+	return count
+}
+
+// collect returns a slice containing elements in which operations were applied succesfully on.
+func collect[T any](operators []operator.IntermediateOperator[T], data []T) []T {
+	results := make([]T, 0)
+	for _, x := range data {
+		if y, ok := apply(operators, x); ok {
+			results = append(results, y)
+		}
+	}
+	return results
+}
+
+// forEach applies the given function on elements that yield succesfully when operators are applied. For implementing ForEach.
+func forEach[T any](f func(x T), operators []operator.IntermediateOperator[T], data []T) {
+	for _, x := range data {
+		if y, ok := apply(operators, x); ok {
+			f(y)
+		}
 	}
 }
 
-// FromSlice returns a sequential stream which will use the given callback to initialize its source when required.
-func FromSlice[T any](f func() []T) Stream[T] {
-	return &sequentialStream[T]{
-		source:   sources.FromSlice(f),
-		pipeline: func(input T) (T, bool) { return input, true },
+// reduce applies associative binary function f on elements that yield succesful results after operators are applied. For implementing Reduce.
+func reduce[T any](f func(x, y T) T, operators []operator.IntermediateOperator[T], data []T) (T, bool) {
+	var z T
+	valid := false
+	for _, x := range data {
+		y, ok := apply(operators, x)
+		if ok && valid {
+			z = f(z, y)
+		} else if ok {
+			z = y
+			valid = true
+		}
 	}
-}
-
-// ConcurrentFromSlice returns a concurrent stream which will use the given callback to initialize its source when required.
-// Elements are processed in batches of partition size.
-func ConcurrentFromSlice[T any](f func() []T, concurrency, partitionSize int) Stream[T] {
-	if concurrency <= 1 {
-		panic(errIllegalConfig(fmt.Sprintf("concurrency=%v", concurrency), "ConcurrentFromSlice"))
-	} else if partitionSize < 1 {
-		panic(errIllegalConfig(fmt.Sprintf("partitionSize=%v", concurrency), "ConcurrentFromSlice"))
-	}
-	return &concurrentStream[T]{
-		source:        sources.FromSlice(f),
-		pipeline:      func(input T) (T, bool) { return input, true },
-		concurrency:   concurrency,
-		partitionSize: partitionSize,
-	}
-}
-
-// FromSource returns a sequential stream that processes elements from the given source.
-func FromSource[T any](source sources.Source[T]) Stream[T] {
-	return &sequentialStream[T]{
-		source:   source,
-		pipeline: func(input T) (T, bool) { return input, true },
-	}
-}
-
-// ConcurrentFromSource returns a concurrent stream that processes elements from the given source.
-func ConcurrentFromSource[T any](source sources.Source[T], concurrency, partitionSize int) Stream[T] {
-	if concurrency <= 1 {
-		panic(errIllegalConfig(fmt.Sprintf("concurrency=%v", concurrency), "ConcurrentFromSource"))
-	} else if partitionSize < 1 {
-		panic(errIllegalConfig(fmt.Sprintf("partitionSize=%v", concurrency), "ConcurrentFromSource"))
-	}
-	return &concurrentStream[T]{
-		source:        source,
-		pipeline:      func(input T) (T, bool) { return input, true },
-		concurrency:   concurrency,
-		partitionSize: partitionSize,
-	}
+	return z, valid
 }
