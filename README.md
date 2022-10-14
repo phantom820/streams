@@ -57,7 +57,7 @@ slice := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19
 // A sequential stream .
 sequentialStream := streams.FromSlice[int](func() []int { return slice })
 // A concurrent stream specifies a level of concurrency and partition size. (concurrency level 2)
-concurrentStream := streams.ConcurrentFromSlice[int](func() []int { return slice }, 2)
+concurrentStream := streams.FromSlice[int](func() []int { return slice }, 2)
 
 ```
 
