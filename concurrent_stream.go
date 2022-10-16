@@ -177,6 +177,11 @@ func (stream *concurrentStream[T]) ForEach(f func(element T)) {
 	}
 
 	data := stream.data()
+
+	if len(data) == 0 {
+		return
+	}
+
 	operators := operator.Sort(stream.intermediateOperators)
 	partitionSize := len(data) / stream.concurrency
 	numberOfPartions := int(math.Ceil(float64(len(data)) / float64(partitionSize)))
@@ -203,6 +208,11 @@ func (stream *concurrentStream[T]) Count() int {
 	}
 
 	data := stream.data()
+
+	if len(data) == 0 {
+		return 0
+	}
+
 	operators := operator.Sort(stream.intermediateOperators)
 	partitionSize := len(data) / stream.concurrency
 	numberOfPartions := int(math.Ceil(float64(len(data)) / float64(partitionSize)))
@@ -238,6 +248,12 @@ func (stream *concurrentStream[T]) Reduce(f func(x, y T) T) (T, bool) {
 	}
 
 	data := stream.data()
+
+	if len(data) == 0 {
+		var zero T
+		return zero, false
+	}
+
 	operators := operator.Sort(stream.intermediateOperators)
 	partitionSize := len(data) / stream.concurrency
 	numberOfPartions := int(math.Ceil(float64(len(data)) / float64(partitionSize)))
@@ -266,6 +282,11 @@ func (stream *concurrentStream[T]) Collect() []T {
 	}
 
 	data := stream.data()
+
+	if len(data) == 0 {
+		return []T{}
+	}
+
 	operators := operator.Sort(stream.intermediateOperators)
 	partitionSize := len(data) / stream.concurrency
 	numberOfPartions := int(math.Ceil(float64(len(data)) / float64(partitionSize)))

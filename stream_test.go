@@ -63,6 +63,8 @@ func TestCollect(t *testing.T) {
 		stream Stream[int]
 		want   []int
 	}{
+		{name: "Sequential Collect size : 0", stream: FromSlice(f(0), 1), want: newSlice(0)},
+		{name: "Concurrent Collect size : 0", stream: FromSlice(f(0), 2), want: newSlice(0)},
 		{name: "Sequential Collect size : 100", stream: FromSlice(f(100), 1), want: newSlice(100)},
 		{name: "Concurrent Collect size : 100", stream: FromSlice(f(100), 2), want: newSlice(100)},
 		{name: "Concurrent Collect size : 1000", stream: FromSlice(f(1000), 2), want: newSlice(1000)},
@@ -221,6 +223,8 @@ func TestFilter(t *testing.T) {
 		stream Stream[int]
 		want   int
 	}{
+		{name: "Sequential Filter size : 0", stream: FromSlice(f(0), 1), want: 0},
+		{name: "Sequential Filter size : 0", stream: FromSlice(f(0), 2), want: 0},
 		{name: "Sequential Filter size : 100", stream: FromSlice(f(100), 1), want: 33},
 		{name: "Sequential Filter size : 1000", stream: FromSlice(f(1000), 1), want: 333},
 		{name: "Concurrent Filter size : 100 Concurrency : 2 Partition size : 50", stream: FromSlice(f(100), 2), want: 33},
@@ -272,6 +276,8 @@ func TestMap(t *testing.T) {
 		stream Stream[int]
 		want   []int
 	}{
+		{name: "Sequential Map size : 0", stream: FromSlice(f(0), 1), want: []int{}},
+		{name: "Concurrent Map size : 0", stream: FromSlice(f(0), 2), want: []int{}},
 		{name: "Sequential Map size : 100", stream: FromSlice(f(100), 1), want: a},
 		{name: "Sequential Map size : 1000", stream: FromSlice(f(1000), 1), want: b},
 		{name: "Concurrent Map size : 100 Concurrency : 2 Partition size : 50", stream: FromSlice(f(100), 2), want: a},
