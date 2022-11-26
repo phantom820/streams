@@ -8,573 +8,418 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func newSlice(size int) []int {
-	slice := make([]int, size)
-	for i := 0; i < size; i++ {
-		slice[i] = i + 1
-	}
-	return slice
-}
+func TestNew(t *testing.T) {
 
-func TestPartition(t *testing.T) {
+	s1 := New(func() []int { return []int{} })
+	s2 := New(func() []int { return []int{} }).Parallelize(2)
 
-	// Case 1 : Partition size 0.
-	assert.Equal(t, 0, len(partition(0, 2)))
-
-	// Case 2: Partition perfect fit.
-	assert.Equal(t, []int{0, 5, 10, 15, 20}, (partition(20, 4)))
-	assert.Equal(t, []int{0, 4, 8, 12, 16, 20}, (partition(20, 5)))
-
-	// Case 3: Partition imperfect fit.
-	assert.Equal(t, []int{0, 6, 12, 20}, (partition(20, 3)))
-
-}
-
-func TestFromSlice(t *testing.T) {
-
-	f := func() []int {
-		return newSlice(10)
-	}
-	seqStream := FromSlice(f, 1)
-	concStream := FromSlice(f, 2)
-
-	assert.NotNil(t, seqStream.(*sequentialStream[int]))
-	assert.NotNil(t, concStream.(*concurrentStream[int]))
-
-	t.Run("", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r != nil {
-				assert.Equal(t, IllegalConfig, r.(streamError).Code())
-			}
-		}()
-		FromSlice(f, -2)
-	})
+	assert.False(t, s1.Closed())
+	assert.False(t, s1.Terminated())
+	assert.False(t, s2.Closed())
+	assert.False(t, s2.Terminated())
+	assert.True(t, s2.Parallel())
 
 }
 
 func TestCollect(t *testing.T) {
 
-	f := func(size int) func() []int {
-		return func() []int { return newSlice(size) }
+	type collectTest struct {
+		data     []int
+		expected []int
 	}
 
-	var tests = []struct {
-		name   string
-		stream Stream[int]
-		want   []int
-	}{
-		{name: "Sequential Collect size : 0", stream: FromSlice(f(0), 1), want: newSlice(0)},
-		{name: "Concurrent Collect size : 0", stream: FromSlice(f(0), 2), want: newSlice(0)},
-		{name: "Sequential Collect size : 100", stream: FromSlice(f(100), 1), want: newSlice(100)},
-		{name: "Concurrent Collect size : 100", stream: FromSlice(f(100), 2), want: newSlice(100)},
-		{name: "Concurrent Collect size : 1000", stream: FromSlice(f(1000), 2), want: newSlice(1000)},
+	var collectTests = []collectTest{
+		{data: []int{}, expected: []int{}},
+		{data: []int{1, 2, 3, 4, 5, 6, 9, 10}, expected: []int{1, 2, 3, 4, 5, 6, 9, 10}},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.stream.Closed(), false)
-			assert.Equal(t, tt.stream.Terminated(), false)
-			assert.ElementsMatch(t, tt.want, tt.stream.Collect())
-			assert.Equal(t, tt.stream.Closed(), true)
-			assert.Equal(t, tt.stream.Terminated(), true)
-		})
+	for _, test := range collectTests {
+		s1, s2 := New(func() []int { return test.data }), New(func() []int { return test.data }).Parallelize(2)
+		assert.ElementsMatch(t, test.expected, s1.Collect())
+		assert.ElementsMatch(t, test.expected, s2.Collect())
+		assert.True(t, s1.Closed())
+		assert.True(t, s1.Terminated())
+		assert.True(t, s2.Closed())
+		assert.True(t, s2.Terminated())
 
-		t.Run("", func(t *testing.T) {
-			defer func() {
-				if r := recover(); r != nil {
-					assert.Equal(t, StreamTerminated, r.(*streamError).Code())
-				}
-			}()
-			tt.stream.Collect()
-		})
 	}
 
-}
-
-func TestReduce(t *testing.T) {
-
-	f := func(size int) func() []int {
-		return func() []int { return newSlice(size) }
-	}
-
-	var tests = []struct {
-		name   string
-		stream Stream[int]
-		want   int
-	}{
-		{name: "Sequential Reduce size : 100", stream: FromSlice(f(100), 1), want: 5050},
-		{name: "Sequential Reduce size : 1000", stream: FromSlice(f(1000), 1), want: 500500},
-		{name: "Concurrent Reduce size : 100", stream: FromSlice(f(100), 2), want: 5050},
-		{name: "Concurrent Reduce size : 1000", stream: FromSlice(f(1000), 2), want: 500500},
-	}
-
-	for _, tt := range tests {
-		t.Run("", func(t *testing.T) {
-			assert.Equal(t, tt.stream.Closed(), false)
-			assert.Equal(t, tt.stream.Terminated(), false)
-			sum, _ := tt.stream.Reduce(func(x, y int) int { return x + y })
-			assert.Equal(t, tt.want, sum)
-			assert.Equal(t, tt.stream.Closed(), true)
-			assert.Equal(t, tt.stream.Terminated(), true)
-
-		})
-
-		t.Run("", func(t *testing.T) {
-			defer func() {
-				if r := recover(); r != nil {
-					assert.Equal(t, StreamTerminated, r.(*streamError).Code())
-				}
-			}()
-			tt.stream.Reduce(func(x, y int) int { return x + y })
-		})
-	}
-}
-
-func TestCount(t *testing.T) {
-
-	f := func(size int) func() []int {
-		return func() []int { return newSlice(size) }
-	}
-
-	var tests = []struct {
-		name   string
-		stream Stream[int]
-		want   int
-	}{
-		{name: "Sequential Count size : 100", stream: FromSlice(f(100), 1), want: 100},
-		{name: "Sequential Count size : 1000", stream: FromSlice(f(1000), 1), want: 1000},
-		{name: "Concurrent Count size : 100 Concurrency : 2 Partition size : 50", stream: FromSlice(f(100), 2), want: 100},
-		{name: "Concurrent Count size : 1000 Concurrency : 2 Partition size : 8", stream: FromSlice(f(1000), 2), want: 1000},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.stream.Closed(), false)
-			assert.Equal(t, tt.stream.Terminated(), false)
-			assert.Equal(t, tt.want, tt.stream.Count())
-			assert.Equal(t, tt.stream.Closed(), true)
-			assert.Equal(t, tt.stream.Terminated(), true)
-		})
-
-		t.Run("", func(t *testing.T) {
-			defer func() {
-				if r := recover(); r != nil {
-					assert.Equal(t, StreamTerminated, r.(*streamError).Code())
-				}
-			}()
-			tt.stream.Count()
-		})
-	}
-}
-
-func TestForEach(t *testing.T) {
-
-	f := func(size int) func() []int {
-		return func() []int { return newSlice(size) }
-	}
-
-	var tests = []struct {
-		name   string
-		stream Stream[int]
-		want   int
-	}{
-		{name: "Sequential ForEach size : 100", stream: FromSlice(f(100), 1), want: 100},
-		{name: "Sequential ForEach size : 1000", stream: FromSlice(f(1000), 1), want: 1000},
-		{name: "Concurrent ForEach size : 100 Concurrency : 2 Partition size : 50", stream: FromSlice(f(100), 2), want: 100},
-		{name: "Concurrent ForEach size : 1000 Concurrency : 2 Partition size : 8", stream: FromSlice(f(1000), 2), want: 1000},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.stream.Closed(), false)
-			assert.Equal(t, tt.stream.Terminated(), false)
-			var mutex sync.Mutex
-			count := 0
-			tt.stream.ForEach(func(x int) {
-				mutex.Lock()
-				count = count + 1
-				mutex.Unlock()
-			})
-			assert.Equal(t, tt.want, count)
-			assert.Equal(t, tt.stream.Closed(), true)
-			assert.Equal(t, tt.stream.Terminated(), true)
-
-		})
-
-		t.Run("", func(t *testing.T) {
-			defer func() {
-				if r := recover(); r != nil {
-					assert.Equal(t, StreamTerminated, r.(*streamError).Code())
-				}
-			}()
-			tt.stream.ForEach(func(x int) {})
-		})
-	}
 }
 
 func TestFilter(t *testing.T) {
 
-	f := func(size int) func() []int {
-		return func() []int { return newSlice(size) }
+	type filterTest struct {
+		data     []int
+		filter   func(int) bool
+		expected []int
 	}
 
-	var tests = []struct {
-		name   string
-		stream Stream[int]
-		want   int
-	}{
-		{name: "Sequential Filter size : 0", stream: FromSlice(f(0), 1), want: 0},
-		{name: "Sequential Filter size : 0", stream: FromSlice(f(0), 2), want: 0},
-		{name: "Sequential Filter size : 100", stream: FromSlice(f(100), 1), want: 33},
-		{name: "Sequential Filter size : 1000", stream: FromSlice(f(1000), 1), want: 333},
-		{name: "Concurrent Filter size : 100 Concurrency : 2 Partition size : 50", stream: FromSlice(f(100), 2), want: 33},
-		{name: "Concurrent Filter size : 1000 Concurrency : 2 Partition size : 8", stream: FromSlice(f(1000), 2), want: 333},
+	var filterTests = []filterTest{
+		{data: []int{}, filter: func(i int) bool { return true }, expected: []int{}},
+		{data: []int{1, 2, 3, 4, 5, 6, 9, 10}, filter: func(i int) bool { return i%2 == 0 }, expected: []int{2, 4, 6, 10}},
 	}
 
-	for _, tt := range tests {
-		t.Run(t.Name(), func(t *testing.T) {
-			assert.Equal(t, tt.stream.Closed(), false)
-			assert.Equal(t, tt.stream.Terminated(), false)
-			filteredStream := tt.stream.Filter(func(x int) bool { return x%3 == 0 })
-			assert.Equal(t, tt.want, filteredStream.Count())
-			assert.Equal(t, tt.stream.Closed(), true)
-			assert.Equal(t, filteredStream.Terminated(), true)
-		})
-
-		t.Run("", func(t *testing.T) {
-			defer func() {
-				if r := recover(); r != nil {
-					assert.Equal(t, StreamClosed, r.(*streamError).Code())
-				}
-			}()
-			tt.stream.Filter(func(x int) bool { return x%3 == 0 })
-		})
-
+	for _, test := range filterTests {
+		s1, s2 := New(func() []int { return test.data }).Filter(test.filter),
+			New(func() []int { return test.data }).Parallelize(2).Filter(test.filter)
+		assert.ElementsMatch(t, test.expected, s1.Collect())
+		assert.ElementsMatch(t, test.expected, s2.Collect())
+		assert.True(t, s1.Closed())
+		assert.True(t, s1.Terminated())
+		assert.True(t, s2.Closed())
+		assert.True(t, s2.Terminated())
 	}
 
 }
 
 func TestMap(t *testing.T) {
 
-	f := func(size int) func() []int {
-		return func() []int { return newSlice(size) }
+	type mapTest struct {
+		data       []int
+		uniformMap func(int) int
+		expected   []int
 	}
 
-	a := newSlice(100)
-	b := newSlice(1000)
-
-	for i := range a {
-		a[i] = a[i] + 10
+	var mapTests = []mapTest{
+		{data: []int{}, uniformMap: func(i int) int { return i }, expected: []int{}},
+		{data: []int{1, 2, 3, 4, 5}, uniformMap: func(i int) int { return i * 2 }, expected: []int{2, 4, 6, 8, 10}},
 	}
 
-	for i := range b {
-		b[i] = b[i] + 10
-	}
-
-	var tests = []struct {
-		name   string
-		stream Stream[int]
-		want   []int
-	}{
-		{name: "Sequential Map size : 0", stream: FromSlice(f(0), 1), want: []int{}},
-		{name: "Concurrent Map size : 0", stream: FromSlice(f(0), 2), want: []int{}},
-		{name: "Sequential Map size : 100", stream: FromSlice(f(100), 1), want: a},
-		{name: "Sequential Map size : 1000", stream: FromSlice(f(1000), 1), want: b},
-		{name: "Concurrent Map size : 100 Concurrency : 2 Partition size : 50", stream: FromSlice(f(100), 2), want: a},
-		{name: "Concurrent Map size : 1000 Concurrency : 2 Partition size : 8", stream: FromSlice(f(1000), 2), want: b},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.stream.Closed(), false)
-			assert.Equal(t, tt.stream.Terminated(), false)
-			mappedStream := tt.stream.Map(func(x int) int { return x + 10 })
-			assert.ElementsMatch(t, tt.want, mappedStream.Collect())
-			assert.Equal(t, tt.stream.Closed(), true)
-			assert.Equal(t, mappedStream.Terminated(), true)
-		})
-
-		t.Run("", func(t *testing.T) {
-			defer func() {
-				if r := recover(); r != nil {
-					assert.Equal(t, StreamClosed, r.(*streamError).Code())
-				}
-			}()
-			tt.stream.Map(func(x int) int { return x })
-		})
+	for _, test := range mapTests {
+		s1, s2 := New(func() []int { return test.data }).Map(test.uniformMap),
+			New(func() []int { return test.data }).Parallelize(2).Map(test.uniformMap)
+		assert.ElementsMatch(t, test.expected, s1.Collect())
+		assert.ElementsMatch(t, test.expected, s2.Collect())
+		assert.True(t, s1.Closed())
+		assert.True(t, s1.Terminated())
+		assert.True(t, s2.Closed())
+		assert.True(t, s2.Terminated())
 	}
 
 }
 
+func TestCount(t *testing.T) {
+
+	type countTest struct {
+		data     []int
+		expected int
+	}
+
+	var countTests = []countTest{
+		{data: []int{}, expected: 0},
+		{data: []int{1, 2, 3, 4, 5}, expected: 5},
+	}
+
+	for _, test := range countTests {
+		s1, s2 := New(func() []int { return test.data }),
+			New(func() []int { return test.data }).Parallelize(2)
+		assert.Equal(t, test.expected, s1.Count())
+		assert.Equal(t, test.expected, s2.Count())
+		assert.True(t, s1.Closed())
+		assert.True(t, s1.Terminated())
+		assert.True(t, s2.Closed())
+		assert.True(t, s2.Terminated())
+	}
+
+}
+
+func TestReduce(t *testing.T) {
+
+	type reduceTest struct {
+		data     []int
+		reduce   func(x, y int) int
+		expected int
+	}
+
+	var reduceTests = []reduceTest{
+		{data: []int{}, reduce: func(x, y int) int { return x + y }, expected: 0},
+		{data: []int{1, 2, 3, 4, 5}, reduce: func(x, y int) int { return x + y }, expected: 15},
+		{data: []int{1, 2, 3, 4, 5}, reduce: func(x, y int) int { return x * y }, expected: 120},
+	}
+
+	for _, test := range reduceTests {
+		s1, s2 := New(func() []int { return test.data }),
+			New(func() []int { return test.data }).Parallelize(2)
+		assert.Equal(t, test.expected, s1.Reduce(test.reduce))
+		assert.Equal(t, test.expected, s2.Reduce(test.reduce))
+		assert.True(t, s1.Closed())
+		assert.True(t, s1.Terminated())
+		assert.True(t, s2.Closed())
+		assert.True(t, s2.Terminated())
+	}
+}
+
 func TestLimit(t *testing.T) {
 
-	f := func(size int) func() []int {
-		return func() []int { return newSlice(size) }
+	type limitTest struct {
+		data     []int
+		limit    int
+		expected int
 	}
 
-	var tests = []struct {
-		name   string
-		stream Stream[int]
-		want   int
-		limit  int
-	}{
-		{name: "Sequential Limit size : 100", stream: FromSlice(f(100), 1), want: 0, limit: 0},
-		{name: "Sequential Limit size : 1000", stream: FromSlice(f(1000), 1), want: 10, limit: 10},
-		{name: "Concurrent Limit size : 100 Concurrency : 2 Partition size : 50", stream: FromSlice(f(100), 2), want: 5, limit: 5},
-		{name: "Concurrent Limit size : 1000 Concurrency : 2 Partition size : 8", stream: FromSlice(f(1000), 2), want: 1000, limit: 2000},
+	var limitTests = []limitTest{
+		{data: []int{}, limit: 2, expected: 0},
+		{data: []int{1, 2, 3, 4, 5}, limit: 3, expected: 3},
+		{data: []int{1, 2, 3, 4, 5}, limit: 4, expected: 4},
+		{data: []int{1, 2, 3, 4, 5}, limit: 0, expected: 0},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.stream.Closed(), false)
-			assert.Equal(t, tt.stream.Terminated(), false)
-			assert.Equal(t, tt.want, tt.stream.Limit(tt.limit).Count())
-			assert.Equal(t, tt.stream.Closed(), true)
-		})
-
-		t.Run("", func(t *testing.T) {
-			defer func() {
-				if r := recover(); r != nil {
-					assert.Equal(t, StreamClosed, r.(*streamError).Code())
-				}
-			}()
-			tt.stream.Limit(1)
-		})
-
+	// Repeat here to check for any potential race conditions.
+	for i := 0; i < 10; i++ {
+		for _, test := range limitTests {
+			s1, s2 := New(func() []int { return test.data }).Limit(test.limit),
+				New(func() []int { return test.data }).Parallelize(2).Limit(test.limit)
+			assert.Equal(t, test.expected, s1.Count())
+			assert.Equal(t, test.expected, s2.Count())
+			assert.True(t, s1.Closed())
+			assert.True(t, s1.Terminated())
+			assert.True(t, s2.Closed())
+			assert.True(t, s2.Terminated())
+		}
 	}
 }
 
 func TestSkip(t *testing.T) {
 
-	f := func(size int) func() []int {
-		return func() []int { return newSlice(size) }
+	type skipTest struct {
+		data     []int
+		skip     int
+		expected int
 	}
 
-	var tests = []struct {
-		name   string
-		stream Stream[int]
-		want   int
-		skip   int
-	}{
-		{name: "Sequential Skip size : 100", stream: FromSlice(f(100), 1), want: 100, skip: 0},
-		{name: "Sequential Skip size : 1000", stream: FromSlice(f(1000), 1), want: 990, skip: 10},
-		{name: "Concurrent Skip size : 100 Concurrency : 2 Partition size : 50", stream: FromSlice(f(100), 2), want: 50, skip: 50},
-		{name: "Concurrent Skip size : 1000 Concurrency : 2 Partition size : 8", stream: FromSlice(f(1000), 2), want: 0, skip: 2000},
+	var skipTests = []skipTest{
+		{data: []int{}, skip: 2, expected: 0},
+		{data: []int{1, 2, 3, 4, 5}, skip: 2, expected: 3},
+		{data: []int{1, 2, 3, 4, 5}, skip: 4, expected: 1},
+		{data: []int{1, 2, 3, 4, 5}, skip: 5, expected: 0},
 	}
 
-	for _, tt := range tests {
-
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.stream.Closed(), false)
-			assert.Equal(t, tt.stream.Terminated(), false)
-			assert.Equal(t, tt.want, tt.stream.Skip(tt.skip).Count())
-			assert.Equal(t, tt.stream.Closed(), true)
-		})
-
-		t.Run("", func(t *testing.T) {
-			defer func() {
-				if r := recover(); r != nil {
-					assert.Equal(t, StreamClosed, r.(*streamError).Code())
-				}
-			}()
-			tt.stream.Skip(1)
-		})
-
+	for _, test := range skipTests {
+		s1, s2 := New(func() []int { return test.data }).Skip(test.skip),
+			New(func() []int { return test.data }).Parallelize(2).Skip(test.skip)
+		assert.Equal(t, test.expected, s1.Count())
+		assert.Equal(t, test.expected, s2.Count())
+		assert.True(t, s1.Closed())
+		assert.True(t, s1.Terminated())
+		assert.True(t, s2.Closed())
+		assert.True(t, s2.Terminated())
 	}
 }
 
 func TestDistinct(t *testing.T) {
 
-	f := func(size int) func() []int {
-		return func() []int {
-			data := make([]int, size)
-			for i := 0; i < size; i++ {
-				data[i] = i % 10
-			}
-			return data
+	type distinctTest struct {
+		data     []int
+		expected []int
+	}
+
+	var distinctTests = []distinctTest{
+		{data: []int{}, expected: []int{}},
+		{data: []int{1, 2, 3, 4, 5, 1, 2, 2, 3, 4, 5, 6}, expected: []int{1, 2, 3, 4, 5, 6}},
+		{data: []int{1, 1, 1, 1, 2, 3, 4, 5}, expected: []int{1, 2, 3, 4, 5}},
+	}
+
+	distinct := func(i int) string { return fmt.Sprint(i) }
+	// Repeat here to check for any potential race conditions.
+	for i := 0; i < 10; i++ {
+		for _, test := range distinctTests {
+			s1, s2, s3 := New(func() []int { return test.data }).Distinct(distinct),
+				New(func() []int { return test.data }).Distinct(distinct).Distinct(distinct),
+				New(func() []int { return test.data }).Parallelize(2).Distinct(distinct)
+
+			assert.ElementsMatch(t, test.expected, s1.Collect())
+			assert.ElementsMatch(t, test.expected, s2.Collect())
+			assert.ElementsMatch(t, test.expected, s3.Collect())
+			assert.True(t, s1.Closed())
+			assert.True(t, s1.Terminated())
+			assert.True(t, s2.Closed())
+			assert.True(t, s2.Terminated())
 		}
 	}
 
-	distinceElements := []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
-
-	var tests = []struct {
-		name   string
-		stream Stream[int]
-		want   []int
-	}{
-		{name: "Sequential Distinct size : 100", stream: FromSlice(f(100), 1), want: distinceElements},
-		{name: "Sequential Distinct size : 1000", stream: FromSlice(f(1000), 1), want: distinceElements},
-		{name: "Concurrent Distinct size : 100 Concurrency : 2 Partition size : 50", stream: FromSlice(f(100), 2), want: distinceElements},
-		{name: "Concurrent Distinct size : 1000 Concurrency : 2 Partition size : 8", stream: FromSlice(f(1000), 2), want: distinceElements},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.stream.Closed(), false)
-			assert.Equal(t, tt.stream.Terminated(), false)
-			assert.ElementsMatch(t, tt.want, tt.stream.Distinct(func(x, y int) bool { return x == y }, func(x int) int { return x }).Collect())
-			assert.Equal(t, tt.stream.Closed(), true)
-		})
-
-		t.Run("", func(t *testing.T) {
-			defer func() {
-				if r := recover(); r != nil {
-					assert.Equal(t, StreamClosed, r.(*streamError).Code())
-				}
-			}()
-			tt.stream.Distinct(func(x, y int) bool { return x == y }, func(x int) int { return x })
-		})
-
-	}
 }
 
 func TestPeek(t *testing.T) {
 
-	f := func(size int) func() []int {
-		return func() []int { return newSlice(size) }
+	type peekTest struct {
+		data     []int
+		expected int
 	}
 
-	var tests = []struct {
-		name   string
-		stream Stream[int]
-		want   int
-	}{
-		{name: "Sequential Peek size : 100", stream: FromSlice(f(100), 1), want: 100},
-		{name: "Sequential Peek size : 1000", stream: FromSlice(f(1000), 1), want: 1000},
-		{name: "Concurrent Peek size : 100 Concurrency : 2 Partition size : 50", stream: FromSlice(f(100), 2), want: 100},
-		{name: "Concurrent Peek size : 1000 Concurrency : 2 Partition size : 8", stream: FromSlice(f(1000), 2), want: 1000},
+	var peekTests = []peekTest{
+		{data: []int{}, expected: 0},
+		{data: []int{1, 2, 3, 4, 5}, expected: 5},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.stream.Closed(), false)
-			assert.Equal(t, tt.stream.Terminated(), false)
-			peeked := false
-			count := tt.stream.Peek(func(x int) {
-				if x == 1 {
-					peeked = true
-				}
-			}).Count()
-			assert.Equal(t, true, peeked)
-			assert.Equal(t, tt.want, count)
-			assert.Equal(t, tt.stream.Closed(), true)
-		})
+	counter := 0
+	var mux sync.Mutex
+	peek := func(i int) {
+		mux.Lock()
+		defer mux.Unlock()
+		counter++
+	}
 
+	for _, test := range peekTests {
+
+		s1, s2 := New(func() []int { return test.data }).Peek(peek),
+			New(func() []int { return test.data }).Parallelize(2).Peek(peek)
+
+		s1.Collect()
+		assert.Equal(t, test.expected, counter)
+		counter = 0
+		s2.Collect()
+		assert.Equal(t, test.expected, counter)
+		assert.True(t, s1.Closed())
+		assert.True(t, s1.Terminated())
+		assert.True(t, s2.Closed())
+		assert.True(t, s2.Terminated())
+
+	}
+
+}
+
+func TestForEach(t *testing.T) {
+
+	type forEachTest struct {
+		data     []int
+		expected int
+	}
+
+	var forEachTests = []forEachTest{
+		{data: []int{}, expected: 0},
+		{data: []int{1, 2, 3, 4, 5}, expected: 5},
+	}
+
+	counter := 0
+	var mux sync.Mutex
+	forEach := func(i int) {
+		mux.Lock()
+		defer mux.Unlock()
+		counter++
+	}
+
+	for _, test := range forEachTests {
+
+		s1, s2 := New(func() []int { return test.data }),
+			New(func() []int { return test.data }).Parallelize(2)
+
+		s1.ForEach(forEach)
+		assert.Equal(t, test.expected, counter)
+		counter = 0
+		s2.ForEach(forEach)
+		assert.Equal(t, test.expected, counter)
+		assert.True(t, s1.Closed())
+		assert.True(t, s1.Terminated())
+		assert.True(t, s2.Closed())
+		assert.True(t, s2.Terminated())
+
+	}
+
+}
+
+func TestErr(t *testing.T) {
+
+	type errTest struct {
+		f               func()
+		expectedErrCode int
+	}
+
+	supplier := func() []int { return []int{} }
+	var errTests = []errTest{
+		{f: func() {
+			a := New(supplier)
+			_ = a.Filter(nil)
+			a.Filter(nil)
+		},
+			expectedErrCode: StreamClosed,
+		},
+		{f: func() {
+			a := New(supplier)
+			_ = a.Filter(nil)
+			a.Map(nil)
+		},
+			expectedErrCode: StreamClosed,
+		},
+		{
+			f: func() {
+				a := New(supplier)
+				_ = a.Collect()
+				a.Filter(nil)
+			},
+			expectedErrCode: StreamTerminated,
+		},
+		{
+			f: func() {
+				_ = New(supplier).Parallelize(1)
+			},
+			expectedErrCode: IllegalConfig,
+		},
+		{
+			f: func() {
+				_ = New(supplier).Limit(-1)
+			},
+			expectedErrCode: IllegalArgument,
+		},
+		{
+			f: func() {
+				_ = New(supplier).Skip(-1)
+			},
+			expectedErrCode: IllegalArgument,
+		},
+		{
+			f: func() {
+				a := New(supplier)
+				_ = a.Filter(nil)
+				a.Collect()
+			},
+			expectedErrCode: StreamClosed,
+		},
+	}
+
+	for _, test := range errTests {
 		t.Run("", func(t *testing.T) {
-			defer func() {
+			defer func(expectedErrCode int) {
 				if r := recover(); r != nil {
-					assert.Equal(t, StreamClosed, r.(*streamError).Code())
+					assert.Equal(t, expectedErrCode, r.(*streamError).Code())
 				}
-			}()
-			tt.stream.Peek(func(x int) {})
+			}(test.expectedErrCode)
+			test.f()
 		})
-
 	}
 }
+
 func TestIntegration(t *testing.T) {
 
-	f := func(size int) func() []int {
-		return func() []int { return newSlice(size) }
+	type integrationTest struct {
+		data     []int
+		sequence func(s Stream[int]) Stream[int]
+		expected []int
 	}
 
-	// Case 1 : Filter + Map + Collect.
-	a := []int{4, 6, 8, 10, 12}
-	b := []int{4, 6, 8, 10, 12, 14, 16, 18, 20, 22}
-	var tests1 = []struct {
-		name   string
-		stream Stream[int]
-		want   []int
-	}{
-		{name: "Sequential Integ 1 size : 10", stream: FromSlice(f(10), 1), want: a},
-		{name: "Sequential Integ 1 size : 20", stream: FromSlice(f(20), 1), want: b},
-		{name: "Concurrent Integ 1 size : 10 Concurrency : 2 Partition size : 50", stream: FromSlice(f(10), 2), want: a},
-		{name: "Concurrent Integ 1 size : 20 Concurrency : 2 Partition size : 8", stream: FromSlice(f(20), 2), want: b},
+	var integrationTests = []integrationTest{
+		{data: []int{}, expected: []int{}, sequence: func(s Stream[int]) Stream[int] {
+			return s
+		}},
+		{data: []int{1, 2, 3, 4, 5, 6}, expected: []int{4, 8, 12}, sequence: func(s Stream[int]) Stream[int] {
+			return s.Map(func(x int) int { return x * 2 }).
+				Filter(func(x int) bool { return x%4 == 0 })
+		}},
+		{data: []int{1, 2, 3, 4, 5, 6}, expected: []int{4, 8, 12}, sequence: func(s Stream[int]) Stream[int] {
+			return s.Map(func(x int) int { return x * 2 }).
+				Filter(func(x int) bool { return x%4 == 0 })
+		}},
 	}
 
-	for _, tt := range tests1 {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.stream.Closed(), false)
-			assert.Equal(t, tt.stream.Terminated(), false)
-			results := tt.stream.Filter(func(x int) bool { return x%2 == 0 }).Map(func(x int) int { return x + 2 }).Collect()
-			assert.ElementsMatch(t, tt.want, results)
-			assert.Equal(t, tt.stream.Closed(), true)
-		})
-	}
+	for _, test := range integrationTests {
 
-	// Case 2 : Skip + Filter + Map + Limit + Collect.
+		s1, s2 := New(func() []int { return test.data }),
+			New(func() []int { return test.data }).Parallelize(2)
 
-	var tests2 = []struct {
-		name   string
-		stream Stream[int]
-		limit  int
-		want   int
-	}{
-		{name: "Sequential Integ 2 size : 10", stream: FromSlice(f(10), 1), want: 2, limit: 2},
-		{name: "Sequential Integ 2 size : 20", stream: FromSlice(f(20), 1), want: 4, limit: 4},
-		{name: "Concurrent Integ 2 size : 10 Concurrency : 2 Partition size : 50", stream: FromSlice(f(10), 2), want: 2, limit: 2},
-		{name: "Concurrent Integ 2 size : 20 Concurrency : 2 Partition size : 8", stream: FromSlice(f(20), 2), want: 4, limit: 4},
-	}
+		assert.Equal(t, test.expected, test.sequence(s1).Collect())
+		assert.Equal(t, test.expected, test.sequence(s2).Collect())
+		assert.True(t, s1.Closed())
+		assert.True(t, s2.Closed())
 
-	for _, tt := range tests2 {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.stream.Closed(), false)
-			assert.Equal(t, tt.stream.Terminated(), false)
-			results := tt.stream.Filter(func(x int) bool { return x%2 == 0 }).Limit(tt.limit).Count()
-			assert.Equal(t, tt.want, results)
-			assert.Equal(t, tt.stream.Closed(), true)
-		})
-	}
-
-	// Case 3 : Filter + Filter + Reduce.
-	var tests3 = []struct {
-		name   string
-		stream Stream[int]
-		want   int
-	}{
-		{name: "Sequential Integ 3 size : 10", stream: FromSlice(f(10), 1), want: 28},
-		{name: "Sequential Integ 3 size : 20", stream: FromSlice(f(20), 1), want: 108},
-		{name: "Concurrent Integ 3 size : 10 Concurrency : 2 Partition size : 50", stream: FromSlice(f(10), 2), want: 28},
-		{name: "Concurrent Integ 3 size : 20 Concurrency : 2 Partition size : 8", stream: FromSlice(f(20), 2), want: 108},
-	}
-
-	for _, tt := range tests3 {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.stream.Closed(), false)
-			assert.Equal(t, tt.stream.Terminated(), false)
-			results, _ := tt.stream.Filter(func(x int) bool { return x%2 == 0 }).
-				Filter(func(x int) bool { return x > 2 }).
-				Reduce(func(x, y int) int { return x + y })
-			assert.Equal(t, tt.want, results)
-			assert.Equal(t, tt.stream.Closed(), true)
-		})
-	}
-
-	// Case 4 : Map + Distinct + Filter + Reduce.
-	var tests4 = []struct {
-		name   string
-		stream Stream[int]
-		want   int
-		n      int
-	}{
-		// {name: "Sequential Integ 4 size : 100", stream: FromSlice(f(100), 1), want: 7, n: 5},
-		// {name: "Sequential Integ 4 size : 1000", stream: FromSlice(f(1000), 1), want: 42, n: 10},
-		{name: "Concurrent Integ 4 size : 100 Concurrency : 2 Partition size : 50", stream: FromSlice(f(100), 2), want: 7, n: 5},
-		// {name: "Concurrent Integ 4 size : 1000 Concurrency : 2 Partition size : 8", stream: FromSlice(f(1000), 2), want: 42, n: 10},
-	}
-
-	for _, tt := range tests4 {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.stream.Closed(), false)
-			assert.Equal(t, tt.stream.Terminated(), false)
-			results, _ := tt.stream.Map(func(x int) int { return x % tt.n }).
-				Distinct(func(x, y int) bool { return x == y }, func(x int) int { return x }).
-				Filter(func(x int) bool { return x > 2 }).
-				Distinct(func(x, y int) bool { return x == y }, func(x int) int { return x }).
-				Peek(func(x int) { fmt.Println(x) }).
-				Reduce(func(x, y int) int { return x + y })
-			assert.Equal(t, tt.want, results)
-			assert.Equal(t, tt.stream.Closed(), true)
-		})
 	}
 
 }

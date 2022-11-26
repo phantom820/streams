@@ -1,129 +1,221 @@
-// package streams provides a way of applying a pipeline of operations to a sequence of elements.
 package streams
 
-import (
-	"fmt"
+import "fmt"
 
-	"github.com/phantom820/streams/operator"
-)
-
-// Stream a sequence of elements that can be operated on sequential / concurrently. The underlying source for a stream should be finite, infinite sources
+// Stream a sequence of elements that can be operated on sequentially or in parallel. The underlying source for a stream should be finite, infinite sources
 // are not supported and will lead to an infinite loop.
 type Stream[T any] interface {
+	Filter(f func(x T) bool) Stream[T]        // Returns a stream consisting of the elements of this stream that satisfy the given predicate.
+	Map(f func(x T) T) Stream[T]              // Returns a stream consisting of the results of applying the given transformation to the elements of the stream.
+	Limit(n int) Stream[T]                    // Returns a stream consisting of the elements of this stream, truncated to be no longer than given length.
+	Skip(n int) Stream[T]                     // Returns a stream consisting of the remaining elements of this stream after discarding the first n elements of the stream.
+	Distinct(hash func(x T) string) Stream[T] // Returns a stream consisting of the distinct elements (according to the given hash of elements) of this stream.
+	Peek(f func(x T)) Stream[T]               // Returns a stream consisting of the elements of this stream.
+	// additionally the provided action on each element as elements are consumed.	// Terminal operations.
 
-	// Intermediate operations.
-	Filter(f func(x T) bool) Stream[T]                               // Returns a stream consisting of the elements of this stream that satisfy the given predicate.
-	Map(f func(x T) T) Stream[T]                                     // Returns a stream consisting of the results of applying the given transformation to the elements of the stream.
-	Limit(n int) Stream[T]                                           // Returns a stream consisting of the elements of the stream but only limited to processing n elements.
-	Skip(n int) Stream[T]                                            // Returns a stream that skips the first n elements it encounters in processing.
-	Distinct(equals func(x, y T) bool, hash func(x T) int) Stream[T] // Returns a stream consisting of distinct elements. Elements are distinguished using equality and hash code.
-	Peek(f func(x T)) Stream[T]                                      // Returns a stream consisting of the elements of the given stream but additionaly the given function is invoked for each element.
+	ForEach(f func(x T))       // Performs an action specified by the function f for each element of the stream.
+	Count() int                // Returns a count of elements in the stream.
+	Reduce(f func(x, y T) T) T // Returns result of performing reduction on the elements of the stream, using ssociative accumulation function, and returns the reduced value.
+	// The zero value is returned if there are no elements.
 
-	// Terminal operations.
-	ForEach(f func(x T))               // Performs an action specified by the function f for each element of the stream.
-	Count() int                        // Returns a count of elements in the stream.
-	Reduce(f func(x, y T) T) (T, bool) // Returns the result of appying a reduction on the elements of the stream. If the stream has no elements then the result would
-	// be invalid and the zero value for T along with false would be returned.
-	Collect() []T // Returns a slice containing the elements from the stream.
+	Collect() []T              // Returns a slice containing the elements from the stream.
+	Parallel() bool            // Returns an indication of whether the stream is parallel.
+	Parallelize(int) Stream[T] // Returns a parallel stream with the given level of parallelism.
 
-	// State.
 	Terminated() bool // Checks if a terminal operation has been invoked on the stream.
 	Closed() bool     // Checks if a stream has been closed. A stream is closed either when a new stream is created from it using intermediate
 	// operations, terminated streams are also closed.
-	Concurrent() bool // Checks if the underlying stream is concurrent or sequential.
 
 }
 
-// FromSlice returns a sequential stream which will use the given callback to obtain elements when terminal operation is invoked.
-func FromSlice[T any](f func() []T, concurrency int) Stream[T] {
-	if concurrency < 1 {
-		panic(errIllegalConfig(fmt.Sprintf("concurrency=%v", concurrency), "FromSlice"))
-	} else if concurrency == 1 {
-		return &sequentialStream[T]{
-			data:                  f,
-			intermediateOperators: make([]operator.IntermediateOperator[T], 0),
-		}
-	}
-
-	return &concurrentStream[T]{
-		concurrency:           concurrency,
-		data:                  f,
-		intermediateOperators: make([]operator.IntermediateOperator[T], 0),
-	}
-
+// stream underlying concrete type, keeps track of operations.
+type stream[T any] struct {
+	supplier    func() []T
+	operations  []operator[T]
+	parallel    bool
+	maxRoutines int
+	distinct    bool
+	terminated  bool
+	closed      bool
 }
 
-// partition creates a number of sub intervals in the range [0,n].
-func partition(n int, numberOfPartitions int) []int {
-	if n == 0 {
-		return []int{}
-	}
-	intervals := []int{}
-	partitionSize := n / numberOfPartitions
-
-	for i := 0; i < numberOfPartitions; i++ {
-		intervals = append(intervals, i*partitionSize)
-	}
-
-	intervals = append(intervals, n)
-	return intervals
-}
-
-// apply applies the give list of operations to givene element and returns a result and whether the result is valid or not.
-func apply[T any](operators []operator.IntermediateOperator[T], x T) (T, bool) {
-	for _, operator := range operators {
-		y, ok := operator.Apply(x)
-		if !ok {
-			return y, false
-		}
-		x = y
-	}
-	return x, true
-}
-
-// count returns a count of elements that operations were succesfully applied to. This is for implementing Count on a stream.
-func count[T any](operators []operator.IntermediateOperator[T], data []T) int {
-	count := 0
-	for _, x := range data {
-		if _, ok := apply(operators, x); ok {
-			count++
-		}
-	}
-	return count
-}
-
-// collect returns a slice containing elements in which operations were applied succesfully on.
-func collect[T any](operators []operator.IntermediateOperator[T], data []T) []T {
-	results := make([]T, 0)
-	for _, x := range data {
-		if y, ok := apply(operators, x); ok {
-			results = append(results, y)
-		}
-	}
-	return results
-}
-
-// forEach applies the given function on elements that yield succesfully when operators are applied. For implementing ForEach.
-func forEach[T any](f func(x T), operators []operator.IntermediateOperator[T], data []T) {
-	for _, x := range data {
-		if y, ok := apply(operators, x); ok {
-			f(y)
-		}
+// New creates a new stream with the given supplier for elements.
+func New[T any](supplier func() []T) Stream[T] {
+	return &stream[T]{
+		supplier:   supplier,
+		operations: make([]operator[T], 0),
 	}
 }
 
-// reduce applies associative binary function f on elements that yield succesful results after operators are applied. For implementing Reduce.
-func reduce[T any](f func(x, y T) T, operators []operator.IntermediateOperator[T], data []T) (T, bool) {
-	var z T
-	valid := false
-	for _, x := range data {
-		y, ok := apply(operators, x)
-		if ok && valid {
-			z = f(z, y)
-		} else if ok {
-			z = y
-			valid = true
-		}
+// new creates a new stream which adds the given operation.
+func new[T any](s *stream[T], operator operator[T]) *stream[T] {
+	defer s.close()
+	return &stream[T]{
+		supplier:    s.supplier,
+		operations:  append(s.operations, operator),
+		parallel:    s.parallel,
+		distinct:    s.distinct,
+		maxRoutines: s.maxRoutines,
 	}
-	return z, valid
+}
+
+// Closed returns an indication of whether the stream has been closed or not.
+func (s *stream[T]) Closed() bool {
+	return s.closed
+}
+
+// close closes the stream.
+func (s *stream[T]) close() {
+	s.closed = true
+}
+
+// Terminated returns an indication of whether the stream has been closed by invoking a terminal operation.
+func (s *stream[T]) Terminated() bool {
+	return s.terminated
+}
+
+// terminate terminate the stream.
+func (s *stream[T]) terminate() {
+	s.terminated = true
+	s.closed = true
+}
+
+// valid checks if a stream is valid before performing any type of operation.
+func (s *stream[T]) valid() (bool, *streamError) {
+	if s.Terminated() {
+		err := errStreamTerminated()
+		return false, &err
+	} else if s.Closed() {
+		err := errStreamClosed()
+		return false, &err
+	}
+	return true, nil
+}
+
+// Parallel returns an indication of whether the stream is parallel.
+func (s stream[T]) Parallel() bool {
+	return s.parallel
+}
+
+// Parallelize returns a parallel stream with the given level of parallelism
+func (s *stream[T]) Parallelize(n int) Stream[T] {
+	if n <= 1 {
+		panic(errIllegalConfig("Parallelism", fmt.Sprint(n)))
+	}
+	return &stream[T]{
+		supplier:    s.supplier,
+		operations:  s.operations,
+		parallel:    true,
+		maxRoutines: n,
+	}
+}
+
+// Collect returns a slice containing the elements from the stream.
+func (s *stream[T]) Collect() []T {
+	if ok, err := s.valid(); !ok {
+		panic(err)
+	}
+	defer s.terminate()
+	if s.parallel {
+		return parallelCollect(s.supplier(), s.operations, s.maxRoutines)
+	}
+	return collect(s.supplier(), s.operations)
+}
+
+// Map returns a stream consisting of the results of applying the given uniform
+// mapping function to the elements of this stream.
+func (s *stream[T]) Map(f func(T) T) Stream[T] {
+	if ok, err := s.valid(); !ok {
+		panic(err)
+	}
+	return new(s, uniformMap(f))
+}
+
+// Filter returns a stream consisting of the elements of this stream that match the given predicate.
+func (s *stream[T]) Filter(f func(T) bool) Stream[T] {
+	if ok, err := s.valid(); !ok {
+		panic(err)
+	}
+	return new(s, filter(f))
+}
+
+// Limit returns a stream consisting of the elements of this stream, truncated to be no longer than given length.
+func (s *stream[T]) Limit(n int) Stream[T] {
+	if ok, err := s.valid(); !ok {
+		panic(err)
+	} else if n < 0 {
+		panic(errIllegalArgument("Limit", fmt.Sprint(n)))
+	}
+	return new(s, limit[T](s.parallel, n))
+}
+
+// Skip returns a stream consisting of the remaining elements of this stream after discarding the first n elements of the stream.
+func (s *stream[T]) Skip(n int) Stream[T] {
+	if ok, err := s.valid(); !ok {
+		panic(err)
+	}
+	return new(s, skip[T](s.parallel, n))
+}
+
+// Count returns the count of elements in this stream.
+func (s *stream[T]) Count() int {
+	if ok, err := s.valid(); !ok {
+		panic(err)
+	}
+	defer s.terminate()
+	if s.parallel {
+		return parallelCount(s.supplier(), s.operations, s.maxRoutines)
+	}
+	return count(s.supplier(), s.operations)
+
+}
+
+// Distinct returns a stream consisting of the distinct elements (according to the given hash of elements) of this stream.
+func (s *stream[T]) Distinct(hash func(x T) string) Stream[T] {
+	if ok, err := s.valid(); !ok {
+		panic(err)
+	}
+	newStream := new(s, distinct(s.parallel, s.distinct, hash))
+	newStream.distinct = true
+	return newStream
+}
+
+// ForEach performs an action for each element of this stream.
+func (s *stream[T]) ForEach(f func(T)) {
+	if ok, err := s.valid(); !ok {
+		panic(err)
+	}
+	defer s.terminate()
+	data := s.supplier()
+	operations := s.operations
+	if s.parallel {
+		parallelForEach(data, operations, f, s.maxRoutines)
+		return
+	}
+	forEach(data, operations, f)
+}
+
+// Peek returns a stream consisting of the elements of this stream,
+// additionally the provided action on each element as elements are consumed.
+func (s *stream[T]) Peek(f func(T)) Stream[T] {
+	if ok, err := s.valid(); !ok {
+		panic(err)
+	}
+	return new(s, peek(f))
+}
+
+// Reduce performs a reduction on the elements of the stream, using ssociative accumulation function, and returns the reduced value.
+// The zero value is returned if there are no elements.
+func (s *stream[T]) Reduce(f func(x, y T) T) T {
+	if ok, err := s.valid(); !ok {
+		panic(err)
+	}
+	defer s.terminate()
+	if s.parallel {
+		val, _ := parallelReduce(s.supplier(), s.operations, f, s.maxRoutines)
+		return val
+	}
+	val, _ := reduce(s.supplier(), s.operations, f)
+	return val
+
 }
