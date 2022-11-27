@@ -374,6 +374,22 @@ func TestErr(t *testing.T) {
 			},
 			expectedErrCode: StreamClosed,
 		},
+		{
+			f: func() {
+				a := New(supplier)
+				_ = a.Filter(nil)
+				a.Limit(1)
+			},
+			expectedErrCode: StreamClosed,
+		},
+		{
+			f: func() {
+				a := New(supplier)
+				_ = a.Filter(nil)
+				a.Skip(1)
+			},
+			expectedErrCode: StreamClosed,
+		},
 	}
 
 	for _, test := range errTests {
@@ -388,15 +404,15 @@ func TestErr(t *testing.T) {
 	}
 }
 
-func TestIntegration(t *testing.T) {
+func TestE2E(t *testing.T) {
 
-	type integrationTest struct {
+	type e2eTest[T any] struct {
 		data     []int
 		sequence func(s Stream[int]) Stream[int]
-		expected []int
+		expected T
 	}
 
-	var integrationTests = []integrationTest{
+	var e2eTestsA = []e2eTest[[]int]{
 		{data: []int{}, expected: []int{}, sequence: func(s Stream[int]) Stream[int] {
 			return s
 		}},
@@ -410,13 +426,39 @@ func TestIntegration(t *testing.T) {
 		}},
 	}
 
-	for _, test := range integrationTests {
+	for _, test := range e2eTestsA {
 
 		s1, s2 := New(func() []int { return test.data }),
 			New(func() []int { return test.data }).Parallelize(2)
 
-		assert.Equal(t, test.expected, test.sequence(s1).Collect())
-		assert.Equal(t, test.expected, test.sequence(s2).Collect())
+		assert.ElementsMatch(t, test.expected, test.sequence(s1).Collect())
+		assert.ElementsMatch(t, test.expected, test.sequence(s2).Collect())
+		assert.True(t, s1.Closed())
+		assert.True(t, s2.Closed())
+
+	}
+
+	var e2eTestsB = []e2eTest[int]{
+		{data: []int{}, expected: 0, sequence: func(s Stream[int]) Stream[int] {
+			return s
+		}},
+		{data: []int{1, 2, 3, 4, 5, 6}, expected: 2, sequence: func(s Stream[int]) Stream[int] {
+			return s.Map(func(x int) int { return x * 2 }).
+				Filter(func(x int) bool { return x%4 == 0 }).Limit(2)
+		}},
+		{data: []int{1, 2, 3, 4, 5, 6}, expected: 3, sequence: func(s Stream[int]) Stream[int] {
+			return s.Map(func(x int) int { return x * 2 }).
+				Filter(func(x int) bool { return x%4 == 0 }).Limit(10)
+		}},
+	}
+
+	for _, test := range e2eTestsB {
+
+		s1, s2 := New(func() []int { return test.data }),
+			New(func() []int { return test.data }).Parallelize(2)
+
+		assert.Equal(t, test.expected, test.sequence(s1).Count())
+		assert.Equal(t, test.expected, test.sequence(s2).Count())
 		assert.True(t, s1.Closed())
 		assert.True(t, s2.Closed())
 
