@@ -107,6 +107,15 @@ func count[T any](data []T, operations []operator[T]) int {
 	return counter
 }
 
+// groupCount returns a count of each group.
+func groupCount[T any](groups []Group[T]) map[string]int {
+	result := make(map[string]int)
+	for _, group := range groups {
+		result[group.name] = group.Len()
+	}
+	return result
+}
+
 // parallelCount returns a count of  resulting elements from applying given operations on each input element of the data.
 func parallelCount[T any](data []T, operations []operator[T], maxRoutines int) int {
 
@@ -124,6 +133,28 @@ func parallelCount[T any](data []T, operations []operator[T], maxRoutines int) i
 		count = count + <-channel
 	}
 	return count
+
+}
+
+// groupParallelCount returns a count of each group.
+func groupParallelCount[T any](groups []Group[T], maxRoutines int) map[string]int {
+
+	channel := make(chan map[string]int)
+	subIntervals := subIntervals(len(groups), maxRoutines)
+	for i := 0; i < len(subIntervals)-1; i++ {
+		go func(partition []Group[T]) {
+			channel <- groupCount(partition)
+		}(groups[subIntervals[i]:subIntervals[i+1]])
+	}
+
+	results := make(map[string]int)
+	for i := 0; i < len(subIntervals)-1; i++ {
+		for key, val := range <-channel {
+			results[key] = results[key] + val
+		}
+	}
+
+	return results
 
 }
 
@@ -156,4 +187,16 @@ func parallelCollect[T any](data []T, operations []operator[T], maxRoutines int)
 		results = append(results, <-channel...)
 	}
 	return results
+}
+
+func groupBy[T any](data []T, f func(x T) string) []Group[T] {
+	m := make(map[string][]T)
+	for _, val := range data {
+		m[f(val)] = append(m[f(val)], val)
+	}
+	groups := []Group[T]{}
+	for key := range m {
+		groups = append(groups, Group[T]{name: key, data: m[key]})
+	}
+	return groups
 }
