@@ -13,10 +13,29 @@ const (
 	distinctOperatorName = "DISTINCT"
 )
 
+// operator type to represent an intermediate stream operation.
 type operator[T any] struct {
 	apply    func(x T) (T, bool)
 	name     string
 	stateful bool
+}
+
+// extendOperator extends an operator from acting on a single element to a slice of elements.
+func extendOperator[T any](f operator[T]) operator[[]T] {
+	return operator[[]T]{
+		name:     f.name,
+		stateful: f.stateful,
+		apply: func(values []T) ([]T, bool) {
+			results := make([]T, 0)
+			for _, val := range values {
+				if result, ok := f.apply(val); ok {
+					results = append(results, result)
+				}
+			}
+			return results, len(results) != 0
+		},
+	}
+
 }
 
 // filter returnf filter operator with the given predicate.

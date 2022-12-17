@@ -264,6 +264,7 @@ func TestPeek(t *testing.T) {
 		s1, s2 := New(func() []int { return test.data }).Peek(peek),
 			New(func() []int { return test.data }).Parallelize(2).Peek(peek)
 
+		counter = 0
 		s1.Collect()
 		assert.Equal(t, test.expected, counter)
 		counter = 0
@@ -303,6 +304,7 @@ func TestForEach(t *testing.T) {
 		s1, s2 := New(func() []int { return test.data }),
 			New(func() []int { return test.data }).Parallelize(2)
 
+		counter = 0
 		s1.ForEach(forEach)
 		assert.Equal(t, test.expected, counter)
 		counter = 0

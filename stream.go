@@ -12,8 +12,8 @@ type Stream[T any] interface {
 	Distinct(hash func(x T) string) Stream[T] // Returns a stream consisting of the distinct elements (according to the given hash of elements) of this stream.
 	Peek(f func(x T)) Stream[T]               // Returns a stream consisting of the elements of this stream.
 	// additionally the provided action on each element as elements are consumed.	// Terminal operations.
-	GroupBy(f func(x T) string) GroupedStream[T] // Returns a grouped stream in which elements are assigned a group using the given group key function.
-	Partition(f func(x T) []T) PartitionedStream[[]T]
+	GroupBy(f func(x T) string) GroupedStream[T]    // Returns a grouped stream in which elements are assigned a group using the given group key function.
+	Partition(f func(x T) []T) PartitionedStream[T] // Returns a partitioned streamed whose elements are the results of splitting each member of this stream using the given function.
 
 	ForEach(f func(x T))       // Performs an action specified by the function f for each element of the stream.
 	Count() int                // Returns a count of elements in the stream.
@@ -184,7 +184,7 @@ func (s *stream[T]) GroupBy(groupKey func(x T) string) GroupedStream[T] {
 		supplier := parallelTransformSupplier(s.supplier, s.operations, groupBy, s.maxRoutines)
 		return &groupedStream[T]{
 			supplier:    supplier,
-			operations:  nil,
+			operations:  make([]operator[Group[T]], 0),
 			parallel:    s.parallel,
 			maxRoutines: s.maxRoutines,
 		}
@@ -192,17 +192,18 @@ func (s *stream[T]) GroupBy(groupKey func(x T) string) GroupedStream[T] {
 	supplier := transformSupplier(s.supplier, s.operations, groupBy)
 	return &groupedStream[T]{
 		supplier:    supplier,
-		operations:  nil,
+		operations:  make([]operator[Group[T]], 0),
 		parallel:    s.parallel,
 		maxRoutines: s.maxRoutines,
 	}
 }
 
-func (s *stream[T]) Partition(f func(x T) []T) PartitionedStream[[]T] {
+// Partition returns a partitioned streamed whose elements are the results of splitting each member of this stream using the given function.
+func (s *stream[T]) Partition(f func(x T) []T) PartitionedStream[T] {
 	defer s.close()
 	if s.parallel {
 		supplier := parallelPartitionSupplierElements(s.supplier, s.operations, f, s.maxRoutines)
-		return &partitionedStream[[]T]{
+		return &partitionedStream[T]{
 			supplier:    supplier,
 			operations:  make([]operator[[]T], 0),
 			parallel:    s.parallel,
@@ -213,7 +214,7 @@ func (s *stream[T]) Partition(f func(x T) []T) PartitionedStream[[]T] {
 		return partitionSupplierElements(s.supplier(), s.operations, f)
 	}
 
-	return &partitionedStream[[]T]{
+	return &partitionedStream[T]{
 		supplier:    supplier,
 		operations:  make([]operator[[]T], 0),
 		parallel:    s.parallel,
