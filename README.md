@@ -16,27 +16,27 @@ Streams are also lazily evaluated and any modifications made to the source befor
 // Stream a sequence of elements that can be operated on sequential / concurrently.
 type Stream[T any] interface {
 
-	// Intermediate operations.
-	Filter(f func(x T) bool) Stream[T]                               // Returns a stream consisting of the elements of this stream that satisfy the given predicate.
-	Map(f func(x T) T) Stream[T]                                     // Returns a stream consisting of the results of applying the given transformation to the elements of the stream.
-	Limit(n int) Stream[T]                                           // Returns a stream consisting of the elements of the stream but only limited to processing n elements.
-	Skip(n int) Stream[T]                                            // Returns a stream that skips the first n elements it encounters in processing.
-	Distinct(equals func(x, y T) bool, hash func(x T) int) Stream[T] // Returns a stream consisting of distinct elements. Elements are distinguished using equality and hash code.
-	Peek(f func(x T)) Stream[T]                                      // Returns a stream consisting of the elements of the given stream but additionaly the given function is invoked for each element.
+	Filter(f func(x T) bool) Stream[T]        // Returns a stream consisting of the elements of this stream that satisfy the given predicate.
+	Map(f func(x T) T) Stream[T]              // Returns a stream consisting of the results of applying the given transformation to the elements of the stream.
+	Limit(n int) Stream[T]                    // Returns a stream consisting of the elements of this stream, truncated to be no longer than given length.
+	Skip(n int) Stream[T]                     // Returns a stream consisting of the remaining elements of this stream after discarding the first n elements of the stream.
+	Distinct(hash func(x T) string) Stream[T] // Returns a stream consisting of the distinct elements (according to the given hash of elements) of this stream.
+	Peek(f func(x T)) Stream[T]               // Returns a stream consisting of the elements of this stream.
+	// additionally the provided action on each element as elements are consumed.	// Terminal operations.
+	GroupBy(f func(x T) string) GroupedStream[T]    // Returns a grouped stream in which elements are assigned a group using the given group key function.
+	Partition(f func(x T) []T) PartitionedStream[T] // Returns a partitioned streamed whose elements are the results of splitting each member of this stream using the given function.
 
-	
-
-	// Terminal operations.
-	ForEach(f func(x T))               // Performs an action specified by the function f for each element of this stream.
-	Count() int                        // Returns a count of elements in the stream.
-	Reduce(f func(x, y T) T) (T, bool) // Returns the result of appying a reduction on the elements of the stream. If the stream has no elements then the result would
-	// be invalid and the zero value for T along with false would be returned.
-	Collect() []T // Returns a slice containing the elements from the stream.
+	ForEach(f func(x T))       // Performs an action specified by the function f for each element of the stream.
+	Count() int                // Returns a count of elements in the stream.
+	Reduce(f func(x, y T) T) T // Returns result of performing reduction on the elements of the stream, using ssociative accumulation function, and returns the reduced value.
+	// The zero value is returned if there are no elements.
+	Collect() []T              // Returns a slice containing the elements from the stream.
+	Parallel() bool            // Returns an indication of whether the stream is parallel.
+	Parallelize(int) Stream[T] // Returns a parallel stream with the given level of parallelism.
 
 	Terminated() bool // Checks if a terminal operation has been invoked on the stream.
-	Closed() bool     // Checks if a stream has been closed. In stream is closed either when a new stream is created from it using intermediate
+	Closed() bool     // Checks if a stream has been closed. A stream is closed either when a new stream is created from it using intermediate
 	// operations, terminated streams are also closed.
-	Concurrent() bool // Checks if the stream has a max concurrency > 1 or not.
 }
 ```
 
@@ -56,9 +56,9 @@ type Stream[T any] interface {
 slice := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20}
 
 // A sequential stream .
-sequentialStream := streams.FromSlice[int](func() []int { return slice }, 1)
-// A concurrent stream specifies a level of concurrency and partition size. (concurrency level 2)
-concurrentStream := streams.FromSlice[int](func() []int { return slice }, 2)
+sequentialStream := streams.New[int](func() []int { return slice })
+// A parallel stream specifies the level of parallelism
+parallelStream := streams.New[int](func() []int { return slice }).Parallelize(2)
 
 ```
 
@@ -66,27 +66,27 @@ concurrentStream := streams.FromSlice[int](func() []int { return slice }, 2)
 ##### Filter
 ```go
 slice := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20}
-	newSlice := streams.FromSlice(func() []int { return slice }, 1).Filter(func(x int) bool { return x > 10 }).Collect()
+	newSlice := streams.New(func() []int { return slice }).Filter(func(x int) bool { return x > 10 }).Collect()
 
 // [11 12 13 14 15 16 17 18 19 20]
 ```
 ##### Map
 ```go
 slice := []int{1, 2, 3, 4, 5}
-newSlice := streams.FromSlice(func() []int { return slice },1 ).Map(func(x int) interface{} { return x + 1 }).Collect()
+newSlice := streams.New(func() []int { return slice },1 ).Map(func(x int) interface{} { return x + 1 }).Collect()
 // [2 3 4 5 6]
 ```
 ##### Limit
 ```go
 slice := []int{1, 2, 3, 4, 5}
-newSlice := streams.FromSlice(func() []int { return slice }, 1).Limit(2).Collect()
+newSlice := streams.New(func() []int { return slice }, 1).Limit(2).Collect()
 // [1 2]
 ```
 ##### Distinct
 Requires an equals function and hashcode function for internal hashset.
 ```go
 slice := []int{1, 1, 0, 2, 2, 3, 4, 5, 5}
-newSlice := streams.FromSlice(func() []int { return slice }, 1).
+newSlice := streams.New(func() []int { return slice }).
 Distinct(func(x, y int) bool { return x == y }, func(x int) int { return x }).
 		Collect()
 // [1 0 2 3 4 5]
@@ -97,7 +97,7 @@ Distinct(func(x, y int) bool { return x == y }, func(x int) int { return x }).
 Sum of the even numbers in the range [1,10].
 ```go
 slice := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-sum, ok := streams.FromSlice(func() []int { return slice }, 1).
+sum, ok := streams.New(func() []int { return slice }).
 		Filter(func(x int) bool { return x%2 == 0 }).Reduce(func(x, y int) int { return x + y })
 // 30, true
 ```
@@ -106,7 +106,7 @@ Reduce to lower case and filter out consonants.
 
 slice := []string{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J"}
 
-newSlice := streams.FromSlice(func() []string { return slice }, 2).
+newSlice := streams.New(func() []string { return slice }).
 	Map(func(x string) string { return strings.ToLower(x) }).
 	Filter(func(x string) bool { return strings.ContainsAny(x, "aeiou") }).
 	Collect()
