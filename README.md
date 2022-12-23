@@ -73,13 +73,13 @@ slice := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19
 ##### Map
 ```go
 slice := []int{1, 2, 3, 4, 5}
-newSlice := streams.New(func() []int { return slice },1 ).Map(func(x int) interface{} { return x + 1 }).Collect()
+newSlice := streams.New(func() []int { return slice }).Map(func(x int) interface{} { return x + 1 }).Collect()
 // [2 3 4 5 6]
 ```
 ##### Limit
 ```go
 slice := []int{1, 2, 3, 4, 5}
-newSlice := streams.New(func() []int { return slice }, 1).Limit(2).Collect()
+newSlice := streams.New(func() []int { return slice }).Limit(2).Collect()
 // [1 2]
 ```
 ##### Distinct
