@@ -2,7 +2,7 @@
 [![Build Status](https://app.travis-ci.com/phantom820/streams.svg?branch=master)](https://app.travis-ci.com/phantom820/streams)
 [![codecov](https://codecov.io/gh/phantom820/streams/branch/master/graph/badge.svg?token=I19NMI3C7U)](https://codecov.io/gh/phantom820/streams)
 
-streams is a libray that aims to bring a java streams motivated library to go, this is intended to work with slices, collections and with a custom source that the user can create. 
+streams is a libray that aims to bring a java streams motivated library to go, this is intended to work with slices, collections and with a custom source that the user can create. For performance evaluation see https://github.com/phantom820/streams-benchmarks
 
 ### Stream
 A stream has two type of operations.
